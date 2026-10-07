@@ -1,11 +1,21 @@
-# ForensiAgent-Multimodal
+# Forensic Orchestrator — ForensiAgent-Multimodal
 
-A multi-agent framework for automated analysis of logical forensic extractions (Android/iOS
-file systems, logical disk backups) where **no finding is reported unless it is re-verified
-against the physical evidence**.
+A multi-agent framework for automated analysis of forensic evidence (Android/iOS extractions, Windows /
+Linux / removable disk images) where **no finding is reported unless it is re-verified against the
+physical evidence**.
 
-Sprint 1 delivers the foundation: dataset acquisition, the forensic tooling bridge, the
-deterministic verification engine, and the `MultimodalVisionAgent`.
+## Status
+
+Sprint 1 (foundation):
+
+- Case-based dataset fetcher for public DFIR corpora (NIST CFReDS, Digital Corpora, Magnet CTF, Hickman phones)
+- Forensic tooling bridge: sandbox, read-only SQLite, EXIF/GPS, E01/raw images through libewf + The Sleuth Kit
+- `HeuristicVerificationEngine`: deterministic citation checks, no ML
+- `MultimodalVisionAgent`: EXIF + EasyOCR + Qwen2.5-VL (4-bit) on a single 12 GB GPU
+- Local web console, Markdown case reports, ML dataset export
+
+Planned: `FileSystemAgent`, `AppArtifactAgent`, `TimelineAgent`, `OrchestratorAuditorAgent`. See
+[`HANDOVER.md`](HANDOVER.md) for the Sprint 1 state and the Sprint 2/3 plan.
 
 ## Zero-hallucination contract
 
@@ -43,7 +53,13 @@ Disk images (E01 / split raw) are read with libewf + The Sleuth Kit; the extract
 Prefetch, LNK/jump lists, browser stores, e-mail, user documents and images, `$MFT`, and recovers deleted files, and
 writes `FILELIST.jsonl.gz` with every directory entry and its MACB times. Credential stores are never extracted.
 
+**Evidence data is not included in this repository.** `data/` (about 20 GB of case evidence, datasets and the
+case catalog) is excluded by `.gitignore`; rebuild it locally with `main.py cases build`. All cases are public
+training and reference images.
+
 ## Quick start
+
+Requires Python 3.12. CUDA 12.8 wheels are needed for RTX 50xx GPUs.
 
 ```bash
 python -m venv .venv
@@ -83,7 +99,6 @@ src/verification/heuristic_verifier.py  HeuristicVerificationEngine
 src/agents/base_agent.py            BaseAgent: analyze -> verify -> report
 src/agents/vision_agent.py          MultimodalVisionAgent (EXIF + EasyOCR + Qwen2.5-VL 4-bit)
 main.py                             CLI
+HANDOVER.md                         sprint state and roadmap
 tests/                              unit tests (verifier, bridge, scraper)
 ```
-
-See `HANDOVER.md` for the Sprint 1 state and the Sprint 2/3 plan.

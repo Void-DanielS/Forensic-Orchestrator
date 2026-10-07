@@ -41,3 +41,8 @@ data/_spool/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Archives / backups
+*.zip
+*.7z
+*.tar.gz
