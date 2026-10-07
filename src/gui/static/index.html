@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ForensiAgent Console</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --panel2:#f0f2f5; --ink:#1b1f24; --muted:#5f6b7a; --line:#dde1e6;
+  --accent:#2457d6; --accent-ink:#ffffff; --ok:#1a7f4b; --ok-bg:#e3f4ea; --bad:#c0392b; --bad-bg:#fbe7e4;
+  --warn:#9a6700; --warn-bg:#fff4d6; --obs:#6b5bd2; --obs-bg:#ece9fb; --info:#0b6e99; --info-bg:#e1f1f8;
+  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --ink:#e6e9ee; --muted:#93a0b0; --line:#2a313b;
+    --accent:#6c93ff; --accent-ink:#0b0f16; --ok:#52c48a; --ok-bg:#15301f; --bad:#ff7b6b; --bad-bg:#3a1a17;
+    --warn:#e7b850; --warn-bg:#352a10; --obs:#a99bff; --obs-bg:#251f45; --info:#5fc2ec; --info-bg:#10303d;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --ink:#e6e9ee; --muted:#93a0b0; --line:#2a313b;
+  --accent:#6c93ff; --accent-ink:#0b0f16; --ok:#52c48a; --ok-bg:#15301f; --bad:#ff7b6b; --bad-bg:#3a1a17;
+  --warn:#e7b850; --warn-bg:#352a10; --obs:#a99bff; --obs-bg:#251f45; --info:#5fc2ec; --info-bg:#10303d;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:5px 10px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+select,input[type=number]{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:4px 6px}
+code,.mono{font-family:var(--mono);font-size:12.5px}
+.app{display:grid;grid-template-columns:290px 1fr;grid-template-rows:48px 1fr;height:100vh}
+header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:15px;margin:0;letter-spacing:.2px}
+header .sub{color:var(--muted);font-size:12.5px}
+header .spacer{flex:1}
+#jobs{font-size:12.5px;color:var(--muted)}
+aside{border-right:1px solid var(--line);overflow:auto;background:var(--panel)}
+aside h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 14px 6px}
+.case{padding:8px 14px;cursor:pointer;border-left:3px solid transparent}
+.case:hover{background:var(--panel2)}
+.case.sel{background:var(--panel2);border-left-color:var(--accent)}
+.case .t{font-weight:600;font-size:13px}
+.case .m{color:var(--muted);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
+main{overflow:auto;min-width:0}
+.wrap{padding:16px 20px}
+.chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-size:12px;background:var(--panel);white-space:nowrap}
+.chip.on{border-color:var(--ok);color:var(--ok)}
+.chip.off{color:var(--muted);border-style:dashed}
+.badge{display:inline-block;border-radius:4px;padding:0 6px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.b-verified,.b-corroborates{background:var(--ok-bg);color:var(--ok)}
+.b-rejected,.b-outside_timeframe{background:var(--bad-bg);color:var(--bad)}
+.b-uncorroborated,.b-unverified_mention{background:var(--obs-bg);color:var(--obs)}
+.b-new_lead,.b-not_in_context{background:var(--warn-bg);color:var(--warn)}
+.b-keyword_match,.b-info{background:var(--info-bg);color:var(--info)}
+.casehead h2{margin:0 0 4px;font-size:20px}
+.casehead p{margin:4px 0 10px;color:var(--muted);max-width:980px}
+.evrow{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:14px 0 12px;flex-wrap:wrap}
+.tab{padding:7px 12px;border:none;background:none;border-bottom:2px solid transparent;border-radius:0;color:var(--muted)}
+.tab.sel{border-bottom-color:var(--accent);color:var(--ink);font-weight:600}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.panel h3{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.toolbar label{display:flex;gap:5px;align-items:center;font-size:13px}
+.live{display:grid;grid-template-columns:minmax(260px,1fr) minmax(360px,1.5fr) minmax(280px,1fr);gap:12px;min-height:560px}
+@media (max-width:1200px){.live{grid-template-columns:1fr}}
+.feed{max-height:72vh;overflow:auto;font-size:12.5px}
+.ev{padding:5px 10px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:44px 92px 1fr;gap:6px;cursor:pointer}
+.ev:hover{background:var(--panel2)}
+.ev .tt{color:var(--muted);font-family:var(--mono);font-size:11.5px}
+.ev .k{font-weight:600;font-size:11.5px}
+.ev .d{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev.cur{background:var(--panel2)}
+.artnav{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+.artnav .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+.stage{position:relative;background:var(--panel2);display:flex;justify-content:center;align-items:flex-start;min-height:260px}
+.stage img{max-width:100%;max-height:62vh;display:block}
+.stage svg{position:absolute;pointer-events:none}
+.stage svg polygon{pointer-events:all;fill-opacity:.12;stroke-width:2;vector-effect:non-scaling-stroke}
+.stage svg .ocr-hit{fill:var(--ok);stroke:var(--ok)}
+.stage svg .ocr-kept{fill:var(--warn);stroke:var(--warn)}
+.stage svg .ocr-low{fill:none;stroke:var(--muted);stroke-dasharray:4 3}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--muted);padding:6px 12px;border-top:1px solid var(--line);flex-wrap:wrap}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:2px 10px;padding:10px 12px;font-size:12.5px}
+.kv div:nth-child(odd){color:var(--muted)}
+.sec{padding:10px 12px;border-top:1px solid var(--line);font-size:13px}
+.sec h4{margin:0 0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.fnd{padding:6px 0;border-bottom:1px dashed var(--line)}
+.fnd:last-child{border-bottom:none}
+.small{font-size:12px;color:var(--muted)}
+.ents{padding:8px 12px;display:flex;flex-direction:column;gap:8px;max-height:30vh;overflow:auto}
+.ents .grp b{font-size:11.5px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;display:block;margin-bottom:3px}
+.ents .grp .chip{margin:0 4px 4px 0}
+.links{max-height:40vh;overflow:auto}
+.link{padding:6px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--panel2);position:sticky;top:0}
+.md{max-width:1100px}
+.md h1{font-size:22px}.md h2{font-size:17px;margin-top:26px;border-bottom:1px solid var(--line);padding-bottom:4px}.md h3{font-size:14px}
+.md blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid var(--accent);background:var(--panel2)}
+.md table{margin:8px 0 14px}
+.md code{background:var(--panel2);padding:0 3px;border-radius:3px}
+.docs{display:grid;grid-template-columns:300px 1fr;gap:12px}
+@media (max-width:900px){.docs{grid-template-columns:1fr}}
+.doclist div{padding:6px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doclist div:hover{background:var(--panel2)}
+.doclist .lock{color:var(--muted)}
+pre.doc{white-space:pre-wrap;margin:0;padding:12px;font-size:12.5px;max-height:75vh;overflow:auto;font-family:var(--mono)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
+.bar{height:8px;background:var(--accent);border-radius:4px;opacity:.75}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;padding:10px 12px}
+.thumbs img{width:100%;height:92px;object-fit:cover;border-radius:4px;background:var(--panel2)}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+.err{color:var(--bad);font-size:13px}
+.pill-run{font-family:var(--mono);font-size:12px}
+@media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:48px auto 1fr}aside{max-height:30vh;border-right:none;border-bottom:1px solid var(--line)}header{grid-column:1}.wrap{padding:12px 16px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>ForensiAgent Console</h1><span class="sub">cases · evidence · agents · verification</span>
+    <span class="spacer"></span><span id="jobs"></span>
+    <button id="theme" title="Toggle theme">◐</button>
+  </header>
+  <aside id="cases"></aside>
+  <main><div class="wrap" id="main"><div class="empty">Select a case.</div></div></main>
+</div>
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (p, opt) => { const r = await fetch(p, opt); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
+const qs = o => new URLSearchParams(o).toString();
+const S = { cases: [], caseId: null, case: null, tab: "live", runId: null, events: [], since: 0, follow: true,
+            sel: null, memory: null, timer: null, docSel: null, revealArm: false };
+
+// ---------------------------------------------------------------- theme
+try { const t = localStorage.getItem("fa-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("#theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const nxt = cur === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = nxt;
+  try { localStorage.setItem("fa-theme", nxt); } catch (e) {}
+};
+
+// ---------------------------------------------------------------- cases sidebar
+const KIND = {scenario: "Investigation scenarios", ctf: "CTF cases", challenge: "Challenges", reference_device: "Reference devices"};
+async function loadCases() {
+  S.cases = (await api("/api/cases")).cases;
+  const groups = {};
+  S.cases.forEach(c => (groups[c.kind] ||= []).push(c));
+  $("#cases").innerHTML = Object.keys(KIND).filter(k => groups[k]).map(k => `<h2>${KIND[k]}</h2>` + groups[k].map(c => `
+    <div class="case ${c.case_id === S.caseId ? "sel" : ""}" data-id="${esc(c.case_id)}">
+      <div class="t">${esc(c.title)}</div>
+      <div class="m"><span>${c.evidence_fetched}/${c.evidence_total} evidence</span><span>${c.year}</span>${c.runs ? `<span>${c.runs} runs</span>` : ""}</div>
+    </div>`).join("")).join("");
+  document.querySelectorAll(".case").forEach(el => el.onclick = () => openCase(el.dataset.id));
+}
+
+async function openCase(id) {
+  S.caseId = id; S.runId = null; S.events = []; S.since = 0; S.sel = null; S.memory = null; S.docSel = null;
+  document.querySelectorAll(".case").forEach(el => el.classList.toggle("sel", el.dataset.id === id));
+  S.case = await api("/api/case?" + qs({id}));
+  S.runId = S.case.runs[0]?.run_id || null;
+  try { S.memory = await api("/api/memory?" + qs({id})); } catch (e) { S.memory = null; }
+  render();
+}
+
+// ---------------------------------------------------------------- layout
+function render() {
+  const c = S.case; if (!c) return;
+  const ev = c.evidence.map(e => `<span class="chip ${e.fetched ? "on" : "off"}" title="${esc(e.title)}">${e.fetched ? "●" : "○"} ${esc(e.evidence_id)} · ${esc(e.platform)}</span>`).join("");
+  $("#main").innerHTML = `
+    <div class="casehead"><h2>${esc(c.title)}</h2>
+      <p>${esc(c.summary)}</p>
+      <div class="small">${esc(c.origin)} · ${c.year} · ${c.tags.map(esc).join(", ")}</div>
+      <div class="evrow">${ev}</div></div>
+    <div class="tabs">${[["live","Live agent"],["memory","Investigation memory"],["findings","Findings"],["report","Report"],["docs","Context documents"],["evidence","Evidence"]]
+      .map(([k,l]) => `<button class="tab ${S.tab===k?"sel":""}" data-t="${k}">${l}</button>`).join("")}</div>
+    <div id="tabbody"></div>`;
+  document.querySelectorAll(".tab").forEach(b => b.onclick = () => { S.tab = b.dataset.t; render(); });
+  ({live: renderLive, memory: renderMemory, findings: renderFindings, report: renderReport, docs: renderDocs, evidence: renderEvidence})[S.tab]();
+}
+
+// ---------------------------------------------------------------- live agent
+function runOptions() {
+  return S.case.runs.map(r => `<option value="${esc(r.run_id)}" ${r.run_id===S.runId?"selected":""}>${esc(r.run_id)} · ${esc(r.status)}${r.totals ? ` · ✓${r.totals.verified} ✗${r.totals.rejected} ◌${r.totals.uncorroborated}` : ""}</option>`).join("");
+}
+function renderLive() {
+  const fetched = S.case.evidence.filter(e => e.fetched);
+  $("#tabbody").innerHTML = `
+    <div class="toolbar">
+      <label>Run <select id="runsel">${runOptions() || "<option>no runs yet</option>"}</select></label>
+      <label><input type="checkbox" id="follow" ${S.follow?"checked":""}> follow newest artifact</label>
+      <span class="spacer" style="flex:1"></span>
+      <label>Evidence <select id="nr-ev" multiple size="1" style="min-width:160px">${fetched.map(e => `<option value="${esc(e.evidence_id)}" selected>${esc(e.evidence_id)}</option>`).join("")}</select></label>
+      <label>Images/item <input id="nr-limit" type="number" min="1" max="500" value="4" style="width:64px"></label>
+      <label><input type="checkbox" id="nr-ocr" checked> OCR</label>
+      <label><input type="checkbox" id="nr-vlm" checked> VLM</label>
+      <button class="primary" id="nr-go" ${fetched.length?"":"disabled"}>Start agent run</button>
+    </div>
+    <div id="nr-msg" class="small"></div>
+    <div class="live">
+      <div class="panel"><h3>Agent steps <span class="small" id="stepcount"></span></h3><div class="feed" id="feed"></div></div>
+      <div class="panel" id="artifact"><div class="empty">${S.runId ? "Loading run…" : "Start a run to watch the agent work."}</div></div>
+      <div class="panel" id="ctxpanel"></div>
+    </div>`;
+  $("#runsel").onchange = e => { S.runId = e.target.value; S.events = []; S.since = 0; S.sel = null; pollTrace(true); };
+  $("#follow").onchange = e => { S.follow = e.target.checked; };
+  $("#nr-go").onclick = startRun;
+  renderContextPanel();
+  if (S.runId) pollTrace(true);
+}
+async function startRun() {
+  const evs = [...$("#nr-ev").selectedOptions].map(o => o.value);
+  $("#nr-go").disabled = true; $("#nr-msg").textContent = "Starting…";
+  try {
+    const r = await api("/api/investigate", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({case: S.caseId, evidence: evs, limit: +$("#nr-limit").value, ocr: $("#nr-ocr").checked, vlm: $("#nr-vlm").checked})});
+    $("#nr-msg").textContent = `Run ${r.run_id} started (models load in ~20 s; text index build can take a minute on large evidence).`;
+    S.runId = r.run_id; S.events = []; S.since = 0; S.sel = null; S.follow = true;
+    setTimeout(async () => { S.case = await api("/api/case?" + qs({id: S.caseId})); if (S.tab === "live") { renderLive(); } }, 1500);
+  } catch (e) { $("#nr-msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; $("#nr-go").disabled = false; }
+}
+
+// Build per-artifact state from the event stream.
+function model() {
+  const arts = new Map(); let curEv = null; const order = [];
+  const key = a => `${curEv}|${a}`;
+  const get = a => { const k = key(a); if (!arts.has(k)) { arts.set(k, {key: k, evidence: curEv, path: a, findings: new Map(), links: [], lookups: [], events: []}); order.push(k); } return arts.get(k); };
+  let run = {};
+  for (const e of S.events) {
+    if (e.kind === "run_start") run.start = e;
+    if (e.kind === "evidence_start") curEv = e.evidence_id;
+    if (e.kind === "run_end") run.end = e;
+    if (!e.artifact) continue;
+    const A = get(e.artifact); A.events.push(e);
+    switch (e.kind) {
+      case "artifact_start": A.index = e.index; A.total = e.total; break;
+      case "image": A.image = e; break;
+      case "exif": A.exif = e.tags; break;
+      case "gps": A.gps = e; break;
+      case "ocr": A.ocr = e; break;
+      case "index_lookup": A.lookups.push(e); break;
+      case "vlm_start": A.vlmStart = e; break;
+      case "vlm": A.vlm = e; break;
+      case "finding": A.findings.set(e.finding_id, {...e}); break;
+      case "verification": Object.assign(A.findings.get(e.finding_id) || (A.findings.set(e.finding_id, {}), A.findings.get(e.finding_id)), {status: e.status, checks: e.checks}); break;
+      case "context_link": A.links.push(e); break;
+      case "artifact_end": A.done = e; break;
+      case "error": A.error = e.error; break;
+    }
+  }
+  return {arts, order, run};
+}
+
+const KDESC = {
+  run_start: e => `run started · ${e.evidence?.length} evidence item(s)`,
+  index_built: e => `text index: ${e.cells ?? 0} DB text cells from ${e.databases ?? 0} DBs (${e.evidence_id})`,
+  evidence_start: e => `evidence ${e.evidence_id}: ${e.artifacts} image(s) on ${e.device}`,
+  artifact_start: e => `[${e.index}/${e.total}] ${e.artifact.split("/").pop()}`,
+  image: e => `${e.format} ${e.original_size?.join("×")} · sha256 ${e.sha256?.slice(0,12)}…`,
+  exif: e => `EXIF: ${e.tag_count} tags`,
+  gps: e => `GPS ${e.latitude}, ${e.longitude}`,
+  ocr: e => `OCR: ${e.boxes.length} text regions (${e.boxes.filter(b=>b.kept).length} kept)`,
+  index_lookup: e => `${e.hit ? "✓ ground truth" : "✗ no ground truth"} for “${e.text}”`,
+  vlm_start: e => `VLM ${e.model.split("/").pop()} · ${e.visual_tokens} input tokens`,
+  vlm: e => `VLM answered in ${e.seconds}s: ${e.parsed?.scene || e.raw?.slice(0,80)}`,
+  stage_done: e => `${e.stage} done in ${e.seconds}s`,
+  finding: e => `proposed ${e.category}: ${e.claim}`,
+  verification: e => `${e.status.toUpperCase()} ${e.category}`,
+  context_link: e => `${e.relation}: ${e.value ?? ""}`,
+  memory: e => `memory: ${Object.entries(e.links||{}).map(([k,v])=>k+" "+v).join(", ")}`,
+  artifact_end: e => `done in ${e.seconds}s · ✓${e.counts?.verified ?? 0} ✗${e.counts?.rejected ?? 0} ◌${e.counts?.uncorroborated ?? 0}`,
+  evidence_end: e => `evidence done · ${JSON.stringify(e.status_counts)}`,
+  run_end: e => `run finished in ${e.seconds}s → ${e.report}`,
+  error: e => `ERROR ${e.error}`,
+  evidence_skipped: e => `skipped ${e.evidence_id}: ${e.reason}`,
+};
+const KCLS = {verification: e => "b-" + e.status, context_link: e => "b-" + e.relation, error: () => "b-rejected", finding: () => "b-info", index_lookup: e => e.hit ? "b-verified" : "b-uncorroborated"};
+
+async function pollTrace(reset) {
+  clearTimeout(S.timer);
+  if (!S.runId || S.tab !== "live" || !S.case) return;
+  try {
+    const r = await api("/api/trace?" + qs({case: S.caseId, run: S.runId, since: S.since}));
+    if (r.events.length) { S.events.push(...r.events); S.since = S.events[S.events.length-1].seq; }
+    if (r.events.length || reset) drawLive(r.run);
+    const sel = $("#runsel");
+    if (sel && r.run?.run_id && ![...sel.options].some(o => o.value === r.run.run_id) || (sel && r.run?.status !== "running" && S.lastStatus === "running")) {
+      S.case = await api("/api/case?" + qs({id: S.caseId})); sel.innerHTML = runOptions();
+    }
+    S.lastStatus = r.run?.status;
+    if (r.events.some(e => e.kind === "memory")) { try { S.memory = await api("/api/memory?" + qs({id: S.caseId})); renderContextPanel(S.curA); } catch (e) {} }
+    if (r.run?.status === "running" || !r.run?.status) S.timer = setTimeout(() => pollTrace(false), 1200);
+  } catch (e) { S.timer = setTimeout(() => pollTrace(false), 3000); }
+}
+
+function drawLive(run) {
+  const M = model();
+  if (!S.sel || (S.follow && M.order.length)) S.sel = M.order[M.order.length - 1] || null;
+  const feed = $("#feed"); if (!feed) return;
+  const atBottom = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 30;
+  let curEv = null;
+  feed.innerHTML = S.events.map(e => {
+    if (e.kind === "evidence_start") curEv = e.evidence_id;
+    const k = e.artifact ? `${curEv}|${e.artifact}` : "";
+    const cls = (KCLS[e.kind] || (() => ""))(e);
+    return `<div class="ev ${k && k === S.sel ? "cur" : ""}" data-k="${esc(k)}"><span class="tt">${e.t?.toFixed(1)}s</span><span class="k"><span class="badge ${cls}">${esc(e.kind.replace("_"," "))}</span></span><span class="d" title="${esc((KDESC[e.kind]||(()=>""))(e))}">${esc((KDESC[e.kind]||(()=>""))(e))}</span></div>`;
+  }).join("");
+  feed.querySelectorAll(".ev").forEach(el => el.onclick = () => { if (el.dataset.k) { S.sel = el.dataset.k; S.follow = false; $("#follow").checked = false; drawLive(run); } });
+  if (atBottom || S.follow) feed.scrollTop = feed.scrollHeight;
+  $("#stepcount").textContent = `${S.events.length} events · ${run?.status || ""}`;
+  drawArtifact(M);
+}
+
+function drawArtifact(M) {
+  const box = $("#artifact"); if (!box) return;
+  const A = M.arts.get(S.sel);
+  if (!A) { S.curA = null; box.innerHTML = `<div class="empty">${S.events.length ? "Waiting for the first artifact…" : "No events yet."}</div>`; return; }
+  const i = M.order.indexOf(S.sel);
+  const hitTexts = new Set(A.lookups.filter(l => l.hit).map(l => l.text));
+  const W = A.ocr?.display_size?.[0] || A.image?.display_size?.[0], H = A.ocr?.display_size?.[1] || A.image?.display_size?.[1];
+  const polys = (A.ocr?.boxes || []).map(b => `<polygon class="${!b.kept ? "ocr-low" : hitTexts.has(b.text.trim()) ? "ocr-hit" : "ocr-kept"}" points="${b.bbox.map(p=>p.join(",")).join(" ")}"><title>${esc(b.text)} (conf ${b.conf})</title></polygon>`).join("");
+  const fnds = [...A.findings.values()];
+  const exifRows = Object.entries(A.exif || {}).slice(0, 14).map(([k,v]) => `<div>${esc(k)}</div><div class="mono">${esc(v)}</div>`).join("");
+  const vp = A.vlm?.parsed || {};
+  box.innerHTML = `
+    <div class="artnav"><button id="prev" ${i<=0?"disabled":""}>◀</button><span class="name" title="${esc(A.path)}">${esc(A.evidence)} · ${esc(A.path)}</span>
+      <span class="small">${A.index ?? "?"}/${A.total ?? "?"}</span><button id="next" ${i>=M.order.length-1?"disabled":""}>▶</button></div>
+    <div class="stage" id="stage"><img id="artimg" alt="artifact" src="/api/image?${qs({case: S.caseId, evidence: A.evidence, path: A.path})}">
+      ${W ? `<svg id="ovl" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${polys}</svg>` : ""}</div>
+    <div class="legend"><span><i class="sw" style="background:var(--ok)"></i>OCR text with ground truth in a DB</span><span><i class="sw" style="background:var(--warn)"></i>OCR text, no ground truth</span><span><i class="sw" style="border:1px dashed var(--muted)"></i>low confidence (ignored)</span></div>
+    ${A.error ? `<div class="sec err">${esc(A.error)}</div>` : ""}
+    <div class="kv">
+      <div>Format / size</div><div>${esc(A.image?.format || "")} ${esc(A.image?.original_size?.join("×") || "")} · ${A.image ? (A.image.bytes/1024).toFixed(0)+" KB" : ""}</div>
+      <div>SHA-256</div><div class="mono">${esc(A.image?.sha256 || "")}</div>
+      ${A.gps ? `<div>GPS</div><div>${A.gps.latitude}, ${A.gps.longitude}${A.gps.altitude_m!=null ? " · "+A.gps.altitude_m+" m" : ""} <a href="https://www.openstreetmap.org/?mlat=${A.gps.latitude}&mlon=${A.gps.longitude}" target="_blank" rel="noopener">map</a></div>` : ""}
+      ${exifRows}
+    </div>
+    ${A.vlm ? `<div class="sec"><h4>Vision-language model (not evidence) · ${A.vlm.seconds}s</h4>
+      <div><b>${esc(vp.image_type || "")}</b> ${esc(vp.scene || A.vlm.raw)}</div>
+      ${vp.app_or_ui ? `<div class="small">UI: ${esc(vp.app_or_ui)}</div>` : ""}
+      ${vp.visible_text?.length ? `<div class="small">reads: ${vp.visible_text.map(t => "“"+esc(t)+"”").join(" · ")}</div>` : ""}
+      ${vp.forensic_relevance ? `<div class="small">relevance: ${esc(vp.forensic_relevance)}</div>` : ""}</div>` : (A.vlmStart ? `<div class="sec small">VLM running…</div>` : "")}
+    <div class="sec"><h4>Findings and verification (${fnds.length})</h4>
+      ${fnds.map(f => `<div class="fnd"><span class="badge b-${esc(f.status || "info")}">${esc(f.status || "pending")}</span> <b>${esc(f.category)}</b> ${esc(f.claim)}
+        ${(f.citations||[]).map(c => `<div class="small mono">↳ ${esc(c.locator_type)} ${esc(String(c.locator).slice(0,90))}${c.params ? " "+esc(JSON.stringify(c.params)) : ""} @ ${esc(c.file.split("/").slice(-2).join("/"))}</div>`).join("")}
+        ${(f.checks||[]).filter(c => c.reason).map(c => `<div class="small">${c.verified ? "✓" : "✗"} ${esc(c.reason)}</div>`).join("")}</div>`).join("") || `<div class="small">none yet</div>`}
+    </div>`;
+  $("#prev").onclick = () => { S.sel = M.order[i-1]; S.follow = false; drawLive({status: ""}); };
+  $("#next").onclick = () => { S.sel = M.order[i+1]; S.follow = false; drawLive({status: ""}); };
+  const img = $("#artimg"), svg = $("#ovl");
+  const fit = () => { if (!svg) return; svg.style.width = img.clientWidth + "px"; svg.style.height = img.clientHeight + "px"; svg.style.left = img.offsetLeft + "px"; svg.style.top = img.offsetTop + "px"; };
+  img.onload = fit; window.onresize = fit; fit();
+  S.curA = A;
+  renderContextPanel(A);
+}
+
+function renderContextPanel(A) {
+  const el = $("#ctxpanel"); if (!el) return;
+  const m = S.memory;
+  if (!m) { el.innerHTML = `<h3>Investigation context</h3><div class="empty">No context yet.</div>`; return; }
+  const groups = {};
+  (m.entities || []).forEach(e => { if (e.type !== "date") (groups[e.type] ||= []).push(e); });
+  const order = ["person","email","phone","device","filename","domain","url","gps","keyword"];
+  const corr = new Set((m.links||[]).filter(l => l.relation === "corroborates").map(l => l.entity));
+  const links = A ? A.links : (m.links || []).filter(l => l.run_id === S.runId);
+  el.innerHTML = `
+    <h3>What the agent was told (brief)</h3>
+    <div class="ents">
+      <div class="small">${(m.brief_docs||[]).map(d => esc(d.name)).join(" · ") || "no brief documents"}${m.timeframe ? ` · timeframe ${m.timeframe.start} → ${m.timeframe.end}` : ""}</div>
+      ${order.filter(t => groups[t]).map(t => `<div class="grp"><b>${t} (${groups[t].length})</b>${groups[t].slice(0, t==="keyword"?16:24).map(e => `<span class="chip ${corr.has(e.id)?"on":""}" title="${esc(e.sources?.[0]?.doc)}: ${esc(e.sources?.[0]?.excerpt)}">${corr.has(e.id)?"✓ ":""}${esc(e.value)}</span>`).join("")}</div>`).join("")}
+    </div>
+    <h3>${A ? "Context links for this artifact" : "Context links in this run"} <span class="small">${links.length}</span></h3>
+    <div class="links">${links.map(l => `<div class="link"><span class="badge b-${esc(l.relation)}">${esc(l.relation.replace("_"," "))}</span> ${esc(l.why)}</div>`).join("") || `<div class="empty small">No links yet. Links appear when a finding touches the brief.</div>`}</div>
+    <h3>Memory totals</h3><div class="kv">${Object.entries(m.summary?.links || {}).map(([k,v]) => `<div>${esc(k)}</div><div>${v}</div>`).join("") || "<div>links</div><div>0</div>"}</div>`;
+}
+
+// ---------------------------------------------------------------- memory tab
+function renderMemory() {
+  const m = S.memory;
+  if (!m) { $("#tabbody").innerHTML = `<div class="empty">No memory yet.</div>`; return; }
+  const hits = {}; (m.links||[]).forEach(l => { if (l.entity) hits[l.entity] = (hits[l.entity]||0) + 1; });
+  const rels = [...new Set((m.links||[]).map(l => l.relation))];
+  $("#tabbody").innerHTML = `
+    <p class="small">The memory holds the entities extracted from the <b>brief</b> (never the answer key) and every link between a finding and that context. It is saved at <code>workspace/memory.json</code> after every artifact.</p>
+    <div class="cards" style="grid-template-columns:1fr 1fr">
+    <div class="panel"><h3>Context entities (${(m.entities||[]).length})</h3><div style="max-height:65vh;overflow:auto"><table><tr><th>Type</th><th>Value</th><th>Mentions</th><th>Linked</th><th>Source</th></tr>
+      ${(m.entities||[]).map(e => `<tr><td>${esc(e.type)}</td><td>${esc(e.value)}</td><td>${e.mentions}</td><td>${hits[e.id]||""}</td><td class="small">${esc(e.sources?.[0]?.doc)}:${e.sources?.[0]?.line} — ${esc((e.sources?.[0]?.excerpt||"").slice(0,90))}</td></tr>`).join("")}</table></div></div>
+    <div class="panel"><h3>Links (${(m.links||[]).length}) <select id="relf"><option value="">all</option>${rels.map(r => `<option>${esc(r)}</option>`).join("")}</select></h3><div style="max-height:65vh;overflow:auto" id="lk"></div></div></div>`;
+  const draw = () => { const f = $("#relf").value; $("#lk").innerHTML = `<table><tr><th>Relation</th><th>Evidence · artifact</th><th>Why</th></tr>${(m.links||[]).filter(l => !f || l.relation===f).slice(-500).reverse().map(l => `<tr><td><span class="badge b-${esc(l.relation)}">${esc(l.relation)}</span></td><td class="small">${esc(l.evidence_id)}<br>${esc(l.artifact.split("/").pop())}</td><td>${esc(l.why)}</td></tr>`).join("")}</table>`; };
+  $("#relf").onchange = draw; draw();
+}
+
+// ---------------------------------------------------------------- findings tab
+async function renderFindings() {
+  if (!S.runId) { $("#tabbody").innerHTML = `<div class="empty">No runs yet.</div>`; return; }
+  $("#tabbody").innerHTML = `<div class="toolbar"><label>Run <select id="frun">${runOptions()}</select></label><label>Status <select id="fst"><option value="">all</option><option>verified</option><option>rejected</option><option>uncorroborated</option></select></label><span id="fcount" class="small"></span></div><div class="panel" style="overflow:auto" id="ftab"></div>`;
+  const load = async () => {
+    const r = await api("/api/findings?" + qs({case: S.caseId, run: $("#frun").value}));
+    const draw = () => { const st = $("#fst").value; const fs = r.findings.filter(f => !st || f.status===st);
+      $("#fcount").textContent = `${fs.length} findings`;
+      $("#ftab").innerHTML = `<table><tr><th>Status</th><th>Evidence · artifact</th><th>Category</th><th>Claim</th><th>Citations</th><th>Context</th></tr>${fs.map(f => `<tr>
+        <td><span class="badge b-${esc(f.status)}">${esc(f.status)}</span></td><td class="small">${esc(f.evidence_id||"")}<br>${esc(f.artifact_path.split("/").pop())}</td>
+        <td>${esc(f.category)}</td><td>${esc(f.claim)}</td>
+        <td class="small mono">${f.citations.map(c => `${esc(c.locator_type)}: ${esc(String(c.sql_query||c.exif_tag||c.byte_offset||c.line_number||c.regex).slice(0,70))}<br>sha ${esc(c.expected_hash.slice(0,10))}…`).join("<br>")}</td>
+        <td>${(f.context_links||[]).map(l => `<span class="badge b-${esc(l.relation)}" title="${esc(l.why)}">${esc(l.relation)}</span>`).join(" ")}</td></tr>`).join("")}</table>`; };
+    $("#fst").onchange = draw; draw();
+  };
+  $("#frun").onchange = load; load();
+}
+
+// ---------------------------------------------------------------- report tab
+function mdToHtml(md) {
+  const lines = md.split("\n"); let out = [], i = 0;
+  const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/_([^_]+)_/g, "<i>$1</i>").replace(/&lt;br&gt;/g, "<br>");
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^#{1,4} /.test(l)) { const n = l.match(/^#+/)[0].length; out.push(`<h${n}>${inline(l.slice(n+1))}</h${n}>`); i++; continue; }
+    if (l.startsWith("|")) { const rows = []; while (i < lines.length && lines[i].startsWith("|")) rows.push(lines[i++]);
+      const cells = r => r.replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, "|"));
+      out.push("<table><tr>" + cells(rows[0]).map(c => `<th>${inline(c)}</th>`).join("") + "</tr>" + rows.slice(2).map(r => "<tr>" + cells(r).map(c => `<td>${inline(c)}</td>`).join("") + "</tr>").join("") + "</table>"); continue; }
+    if (l.startsWith("- ")) { const items = []; while (i < lines.length && lines[i].startsWith("- ")) items.push(lines[i++].slice(2)); out.push("<ul>" + items.map(x => `<li>${inline(x)}</li>`).join("") + "</ul>"); continue; }
+    if (l.startsWith("> ")) { out.push(`<blockquote>${inline(l.slice(2))}</blockquote>`); i++; continue; }
+    if (l.trim()) out.push(`<p>${inline(l)}</p>`);
+    i++;
+  }
+  return out.join("\n");
+}
+async function renderReport() {
+  if (!S.case.reports.length) { $("#tabbody").innerHTML = `<div class="empty">No reports yet. Reports are written at the end of each agent run.</div>`; return; }
+  $("#tabbody").innerHTML = `<div class="toolbar"><label>Report <select id="rsel">${S.case.reports.map(r => `<option>${esc(r)}</option>`).join("")}</select></label></div><div class="panel wrap md" id="rbody"></div>`;
+  const load = async () => { const r = await api("/api/report?" + qs({case: S.caseId, name: $("#rsel").value})); $("#rbody").innerHTML = mdToHtml(r.markdown); };
+  $("#rsel").onchange = load; load();
+}
+
+// ---------------------------------------------------------------- documents tab
+function renderDocs() {
+  const d = S.case.docs;
+  const item = (role, n) => `<div data-role="${role}" data-name="${esc(n)}" class="${role==="answer_key"?"lock":""}" title="${esc(n)}">${role==="answer_key"?"🔒 ":""}${esc(n)}</div>`;
+  $("#tabbody").innerHTML = `<div class="docs">
+    <div class="panel doclist"><h3>Brief · given to agents</h3>${(d.brief||[]).map(n => item("brief", n)).join("") || `<div class="small">none</div>`}
+      <h3>Acquisition logs</h3>${(d.acquisition||[]).map(n => item("acquisition", n)).join("") || `<div class="small">none</div>`}
+      <h3>Answer key · hidden from agents</h3>${(d.answer_key||[]).map(n => item("answer_key", n)).join("") || `<div class="small">none</div>`}</div>
+    <div class="panel"><h3 id="dtitle">Select a document</h3><div id="dbody"><div class="empty">Answer-key documents are used only to score agents and are never loaded into their context.</div></div></div></div>`;
+  document.querySelectorAll(".doclist div[data-role]").forEach(el => el.onclick = () => openDoc(el.dataset.role, el.dataset.name));
+}
+async function openDoc(role, name) {
+  $("#dtitle").textContent = `${role} · ${name}`;
+  if (role === "answer_key" && !(S.revealArm === name)) {
+    S.revealArm = false;
+    $("#dbody").innerHTML = `<div class="empty">This is answer-key material. Agents never see it. <br><br><button id="rv">Reveal to me (examiner)</button></div>`;
+    $("#rv").onclick = () => { S.revealArm = name; openDoc(role, name); }; return;
+  }
+  try { const r = await api("/api/doc?" + qs({case: S.caseId, role, name, reveal: role==="answer_key" ? "1" : "0"})); $("#dbody").innerHTML = `<pre class="doc">${esc(r.text)}</pre>`; }
+  catch (e) { $("#dbody").innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- evidence tab
+function renderEvidence() {
+  $("#tabbody").innerHTML = `<div class="cards">${S.case.evidence.map(e => {
+    const cats = Object.entries(e.categories || {}); const max = Math.max(1, ...cats.map(c => c[1]));
+    const fsx = (e.filesystems||[]).map(f => `${esc(f.fstype)} ${f.files ?? 0} files / ${f.dirs ?? 0} dirs / ${f.deleted ?? 0} deleted entries`).join("<br>");
+    const md5 = e.acquisition?.stored_hashes?.MD5;
+    return `<div class="panel"><h3>${e.fetched ? "●" : "○"} ${esc(e.evidence_id)} <span class="small">${esc(e.platform)} · ${esc(e.kind)}</span></h3>
+      <div class="kv"><div>Title</div><div>${esc(e.title)}</div>
+        <div>Status</div><div>${e.fetched ? `${e.files} files extracted · ${(e.bytes/1e6).toFixed(0)} MB${e.deleted_recovered ? ` · ${e.deleted_recovered} recovered deleted` : ""}` : `not fetched (group ${esc(e.group)}, ~${e.transfer_gb} GB)`}</div>
+        ${fsx ? `<div>File systems</div><div>${fsx}</div>` : ""}
+        ${md5 ? `<div>Acquisition MD5</div><div class="mono">${esc(md5)}</div>` : ""}
+        ${e.note ? `<div>Note</div><div>${esc(e.note)}</div>` : ""}</div>
+      ${cats.length ? `<div class="sec"><h4>Extracted by category</h4>${cats.map(([k,v]) => `<div style="display:grid;grid-template-columns:130px 1fr 50px;gap:8px;align-items:center;font-size:12px"><span>${esc(k)}</span><div class="bar" style="width:${Math.max(2, 100*v/max)}%"></div><span>${v}</span></div>`).join("")}</div>` : ""}
+      ${e.fetched ? `<div class="sec"><h4>Images the agent would look at first</h4><div class="thumbs" data-ev="${esc(e.evidence_id)}"><span class="small">loading…</span></div></div>` : ""}
+    </div>`; }).join("")}</div>`;
+  document.querySelectorAll(".thumbs").forEach(async el => {
+    try { const r = await api("/api/images?" + qs({case: S.caseId, evidence: el.dataset.ev, limit: 24}));
+      el.innerHTML = r.images.map(p => `<img loading="lazy" title="${esc(p)}" src="/api/image?${qs({case: S.caseId, evidence: el.dataset.ev, path: p, thumb: 1})}">`).join("") + `<div class="small">${r.total} images total</div>`;
+    } catch (e) { el.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+  });
+}
+
+// ---------------------------------------------------------------- jobs indicator
+async function pollJobs() {
+  try { const j = (await api("/api/jobs")).jobs; const r = j.filter(x => x.status === "running");
+    $("#jobs").textContent = r.length ? `● agent running: ${r.map(x => x.case_id + " " + x.run_id).join(", ")}` : (j.length ? `last run: ${j[j.length-1].status}` : "idle"); } catch (e) {}
+  setTimeout(pollJobs, 3000);
+}
+loadCases().then(() => { if (S.caseId) return; const first = S.cases.find(c => c.runs) || S.cases[0]; if (first) openCase(first.case_id); });
+pollJobs();
+</script>
+</body>
+</html>

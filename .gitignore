@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Forensic evidence, datasets and generated output (~19.5 GB, not source code)
+data/cases/
+data/datasets/
+data/raw_images/
+data/outputs/
+data/_spool/
+*.sqlite
+*.sqlite-journal
+*.db
+*.E01
+*.e01
+*.dd
+*.raw
+*.img
+*.vmdk
+*.mem
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

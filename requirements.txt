@@ -1,0 +1,38 @@
+# ForensiAgent-Multimodal - Sprint 1 (tested on Windows 11, Python 3.12, CUDA 12.8)
+#
+# Blackwell GPUs (RTX 50xx) need the cu128 torch wheels:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r requirements.txt
+#
+# sqlite3 is part of the Python standard library (no pip package needed).
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+
+# Models
+transformers==5.18.0
+accelerate==1.15.0
+bitsandbytes==0.50.2
+huggingface_hub==1.33.0
+qwen-vl-utils==0.0.14
+easyocr==1.7.2
+
+# Forensics / data
+pillow==12.3.0
+piexif==1.1.3
+pillow-heif==1.8.0
+pydantic==2.13.5
+numpy==2.5.2
+requests==2.34.2
+pypdf==6.19.0
+
+# Computer / removable disk images (E01 + The Sleuth Kit)
+pytsk3==20260715
+libewf-python==20260924
+
+# Tests
+pytest==9.1.1
+
+# Optional: dfvfs (more image formats)
+# Optional: exiftool on PATH is used automatically by ImageMetadataBridge.exiftool_json()

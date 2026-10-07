@@ -1,0 +1,392 @@
+<title>ForensiAgent Status Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: a single reading column (case-file report) with wide tables allowed to scroll; summary tiles up top. */
+:root{
+  --paper:#f5f6f4; --sheet:#ffffff; --ink:#18212b; --muted:#56616d; --rule:#d9ddd8;
+  --tag:#b4540a; --tag-soft:#f6e6d6;            /* evidence-tag amber: the accent */
+  --ok:#1d7a4c; --ok-soft:#e0f1e7; --bad:#b3332a; --bad-soft:#f8e2df;
+  --warn:#8a6100; --warn-soft:#fbf0d2; --obs:#5b4fb8; --obs-soft:#ebe8f8;
+  --bar:#3c5a74;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#11161b; --sheet:#171d24; --ink:#e4e8ec; --muted:#9aa5b1; --rule:#2b333c;
+    --tag:#ef9a52; --tag-soft:#3a2716; --ok:#5cc58f; --ok-soft:#163323; --bad:#ff8a7d; --bad-soft:#3b1d1a;
+    --warn:#e5bd55; --warn-soft:#352c12; --obs:#aba1ff; --obs-soft:#272347; --bar:#7da3c4; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#11161b; --sheet:#171d24; --ink:#e4e8ec; --muted:#9aa5b1; --rule:#2b333c;
+  --tag:#ef9a52; --tag-soft:#3a2716; --ok:#5cc58f; --ok-soft:#163323; --bad:#ff8a7d; --bad-soft:#3b1d1a;
+  --warn:#e5bd55; --warn-soft:#352c12; --obs:#aba1ff; --obs-soft:#272347; --bar:#7da3c4; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font:16px/1.6 var(--f-body);padding-inline:16px;padding-block:0 64px}
+main{max-width:980px;margin:0 auto}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.15;margin:0}
+h1{font-size:clamp(2rem,5vw,2.9rem);font-weight:700;letter-spacing:-.01em}
+h2{font-size:1.6rem;font-weight:600;margin-top:3.2rem;padding-top:1.1rem;border-top:2px solid var(--ink);display:flex;gap:.6rem;align-items:baseline}
+h2 .n{font-family:var(--f-mono);font-size:.85rem;color:var(--tag);font-weight:500}
+h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem}
+p,li{max-width:68ch}
+p{margin:.7rem 0}
+a{color:var(--tag)}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+code{background:var(--tag-soft);padding:0 .3em;border-radius:3px}
+.small{font-size:.88rem;color:var(--muted)}
+.eyebrow{font-family:var(--f-mono);font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--tag)}
+
+/* header: styled like an evidence label */
+.label{margin-top:2.2rem;background:var(--sheet);border:1px solid var(--rule);border-left:6px solid var(--tag);padding:1.3rem 1.4rem;display:grid;gap:.7rem}
+.label dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.5rem 1.2rem;margin:.4rem 0 0}
+.label dt{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.label dd{margin:0;font-weight:500}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin-top:1.4rem}
+.tile{background:var(--sheet);padding:.9rem 1rem}
+.tile b{display:block;font-family:var(--f-display);font-size:1.75rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile span{font-size:.84rem;color:var(--muted)}
+
+.scroll{overflow-x:auto;margin:1rem 0;border:1px solid var(--rule);background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;background:var(--paper)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr.group td{background:var(--paper);font-family:var(--f-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--tag)}
+
+.pill{display:inline-block;font-family:var(--f-mono);font-size:.72rem;padding:.05rem .45rem;border-radius:3px;white-space:nowrap;font-weight:500}
+.p-ok{background:var(--ok-soft);color:var(--ok)}
+.p-bad{background:var(--bad-soft);color:var(--bad)}
+.p-warn{background:var(--warn-soft);color:var(--warn)}
+.p-obs{background:var(--obs-soft);color:var(--obs)}
+.p-tag{background:var(--tag-soft);color:var(--tag)}
+
+.bars{display:grid;gap:.45rem;margin:1rem 0;background:var(--sheet);border:1px solid var(--rule);padding:1rem}
+.bar{display:grid;grid-template-columns:9.5rem minmax(0,1fr) 5.5rem;gap:.7rem;align-items:center;font-size:.88rem}
+.bar .track{height:14px;background:var(--paper);border-radius:2px;overflow:hidden}
+.bar .fill{height:100%;background:var(--bar)}
+.bar .v{font-family:var(--f-mono);font-size:.82rem;text-align:right;font-variant-numeric:tabular-nums}
+.bars .axis{font-size:.78rem;color:var(--muted);display:grid;grid-template-columns:9.5rem minmax(0,1fr) 5.5rem;gap:.7rem}
+.bars .axis div{display:flex;justify-content:space-between;font-family:var(--f-mono)}
+
+.callout{border-left:4px solid var(--ok);background:var(--sheet);padding:.8rem 1rem;margin:1rem 0}
+.callout.warn{border-left-color:var(--warn)}
+.callout p{margin:.3rem 0}
+
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin:1rem 0}
+.box{background:var(--sheet);border:1px solid var(--rule);padding:1rem 1.1rem;min-width:0}
+.box h3{margin-top:0}
+.box ul{padding-left:1.1rem;margin:.5rem 0 0}
+.box li{margin:.25rem 0}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:1rem 0;display:grid;gap:.6rem}
+ol.steps>li{counter-increment:s;display:grid;grid-template-columns:2.4rem minmax(0,1fr);gap:.8rem;background:var(--sheet);border:1px solid var(--rule);padding:.8rem 1rem;max-width:none}
+ol.steps>li::before{content:counter(s,decimal-leading-zero);font-family:var(--f-mono);color:var(--tag);font-weight:500;padding-top:.1rem}
+ol.steps b{display:block}
+
+pre{background:var(--sheet);border:1px solid var(--rule);padding:1rem;overflow-x:auto;font-family:var(--f-mono);font-size:.82rem;line-height:1.55;margin:1rem 0}
+pre.mermaid{background:var(--sheet);text-align:center}
+.foot{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule)}
+@media (max-width:560px){.bar,.bars .axis{grid-template-columns:6.5rem minmax(0,1fr) 4.2rem}}
+</style>
+
+<main>
+<header class="label">
+  <div class="eyebrow">Project status report · Sprint 1 + 1.5</div>
+  <h1>ForensiAgent-Multimodal</h1>
+  <p style="margin:0">A multi-agent system that analyses forensic images of computers, phones and removable media, and reports a finding only after a deterministic engine has re-checked it against the evidence. This report covers what exists, what was tested, the case dataset, open issues, and the plan.</p>
+  <dl>
+    <div><dt>Date</dt><dd>6 October 2026</dd></div>
+    <div><dt>Location</dt><dd class="mono">C:\Forensic - Orchestrator\forensic_agent</dd></div>
+    <div><dt>Hardware</dt><dd>RTX 5080 Laptop 16 GB (12 GB budget)</dd></div>
+    <div><dt>Code</dt><dd>5,089 lines of Python · 78 tests passing</dd></div>
+  </dl>
+</header>
+
+<section class="tiles" aria-label="Key figures">
+  <div class="tile"><b>18</b><span>cases (investigations)</span></div>
+  <div class="tile"><b>39 / 40</b><span>evidence items extracted</span></div>
+  <div class="tile"><b>102,343</b><span>files extracted (20.9 GB)</span></div>
+  <div class="tile"><b>1.41 M</b><span>file-system entries with timestamps</span></div>
+  <div class="tile"><b>2,797</b><span>deleted files recovered</span></div>
+  <div class="tile"><b>0</b><span>hash mismatches · 0 rejected claims</span></div>
+</section>
+
+<h2><span class="n">1</span>Summary</h2>
+<p>The foundation is complete and tested on real evidence. The project now holds an evidence database organised <b>by case</b>: each investigation groups its computers, phones and USB drives with the documents that describe it. The first agent, the <b>MultimodalVisionAgent</b>, reads EXIF metadata, runs OCR and a vision-language model on images, links what it finds to the case briefing, and writes a report. Every claim it makes is re-executed against the evidence file by the verifier before it is accepted.</p>
+<div class="callout">
+  <p><b>Tested result.</b> On the M57-Patents case (4 Windows PCs, 4 USB drives) the agent examined 40 images in 250 s and produced <b>41 verified findings and 0 rejected</b>. On the Android 10 reference phone it produced 9 verified and 0 rejected, matching the Sprint 1 proof of concept exactly. Peak GPU memory was 5.5 GB.</p>
+</div>
+<p>A local web console (<code>python main.py gui</code>) shows each agent step live: OCR boxes over the image, metadata, the model's answer, every claim and its verification, and the links to the briefing. A dataset export turns the whole database into tables ready for machine-learning work, split by case.</p>
+
+<h2><span class="n">2</span>What exists</h2>
+<h3>Pipeline</h3>
+<pre class="mermaid">
+flowchart LR
+  A[Public case sources<br/>Digital Corpora, NIST] --> B[Case builder<br/>E01 / raw / ZIP / TAR]
+  B --> C[(Case database<br/>evidence + brief + answer key)]
+  C --> D[Vision agent<br/>EXIF, OCR, VLM]
+  C -->|brief only| E[Investigation context<br/>entities, timeframe]
+  D --> F[Heuristic verifier<br/>hash + locator re-run]
+  F --> G[Context contrast<br/>+ memory]
+  E --> G
+  G --> H[Report + trace<br/>GUI, dataset export]
+  C -.->|answer key, scoring only| I[Future: auditor agent]
+</pre>
+
+<h3>Components</h3>
+<div class="scroll"><table>
+<thead><tr><th>Component</th><th>File</th><th>Status</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td>Device configuration</td><td class="mono">src/config/settings.py</td><td><span class="pill p-ok">done</span></td><td>Single GPU now; dual GPU (RTX 4060 for vision) by flipping one flag.</td></tr>
+<tr><td>Phone corpus fetcher</td><td class="mono">src/utils/dataset_scraper.py</td><td><span class="pill p-ok">done</span></td><td>Reads only the needed parts of ZIP/TAR archives over HTTP, CRC- and SHA-256-checks every file.</td></tr>
+<tr><td>Disk-image extractor</td><td class="mono">src/utils/disk_image.py</td><td><span class="pill p-ok">new</span></td><td>E01 (libewf) or split raw images, The Sleuth Kit for NTFS/FAT/ext. Keeps registry, event logs, Prefetch, LNK, browser data, e-mail, documents, images, <code>$MFT</code>; recovers deleted files; lists every directory entry with MACB times.</td></tr>
+<tr><td>Case registry and builder</td><td class="mono">src/cases/</td><td><span class="pill p-ok">new</span></td><td>18 cases, 40 evidence items, briefs vs answer keys, catalogue in <code>catalog.sqlite</code>.</td></tr>
+<tr><td>Forensic bridge</td><td class="mono">src/bridge/forensic_bridge.py</td><td><span class="pill p-ok">done</span></td><td>Sandbox (no path escapes, long Windows paths), read-only SQL on working copies, EXIF/GPS, text, file walk.</td></tr>
+<tr><td>Text index</td><td class="mono">src/bridge/text_index.py</td><td><span class="pill p-ok">extended</span></td><td>Finds database cells <i>and</i> lines in text files that contain OCR/VLM text, so the claim can be cited.</td></tr>
+<tr><td>Heuristic verifier</td><td class="mono">src/verification/</td><td><span class="pill p-ok">done</span></td><td>Re-runs byte, line, regex, SQL or EXIF locators and checks the SHA-256. No ML involved.</td></tr>
+<tr><td>Vision agent</td><td class="mono">src/agents/vision_agent.py</td><td><span class="pill p-ok">done</span></td><td>EXIF, EasyOCR, Qwen2.5-VL-3B in 4-bit; image ranking per case.</td></tr>
+<tr><td>Investigation context and memory</td><td class="mono">src/context/case_context.py</td><td><span class="pill p-ok">new</span></td><td>Extracts people, e-mails, phones, files, devices and the timeframe from the brief; links findings to them.</td></tr>
+<tr><td>Run trace</td><td class="mono">src/agents/trace.py</td><td><span class="pill p-ok">new</span></td><td>Every agent step written as an event; feeds the GUI.</td></tr>
+<tr><td>Case runner and report</td><td class="mono">src/pipeline/, src/reports/</td><td><span class="pill p-ok">new</span></td><td><code>main.py investigate</code>; Markdown report per run.</td></tr>
+<tr><td>Web console</td><td class="mono">src/gui/</td><td><span class="pill p-ok">new</span></td><td>Live agent view, memory, findings, report, documents, evidence statistics. Localhost only.</td></tr>
+<tr><td>Dataset export</td><td class="mono">src/datasets/export.py</td><td><span class="pill p-ok">new</span></td><td>JSONL tables and a datasheet, split by case.</td></tr>
+<tr><td>File-system, app-artifact, timeline agents</td><td>—</td><td><span class="pill p-warn">planned</span></td><td>Sprint 2 and 3.</td></tr>
+<tr><td>Orchestrator / auditor (final agent)</td><td>—</td><td><span class="pill p-warn">planned</span></td><td>Sprint 3: consolidates and re-verifies everything, scores against answer keys.</td></tr>
+</tbody></table></div>
+
+<h3>The zero-hallucination contract</h3>
+<p>An agent never asserts a fact on its own authority. Each finding carries citations: the file, an exact locator (byte offset, line number, SQL query, regex or EXIF tag), the file's SHA-256 and the expected text. The verifier opens the file again, re-runs the locator and compares. Model-read text (OCR, VLM) counts only when a database cell or text line in the evidence explains at least 85% of it.</p>
+<div class="scroll"><table>
+<thead><tr><th>Status</th><th>Meaning</th><th>Used as evidence?</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p-ok">verified</span></td><td>Every citation was re-executed and matched.</td><td>Yes. The only evidentiary status.</td></tr>
+<tr><td><span class="pill p-bad">rejected</span></td><td>A citation failed: wrong value, changed file, invalid query.</td><td>No. Treated as a hallucination signal.</td></tr>
+<tr><td><span class="pill p-obs">uncorroborated</span></td><td>A model observation with no ground truth (e.g. a scene description).</td><td>No. Kept as labelled context only.</td></tr>
+</tbody></table></div>
+
+<h2><span class="n">3</span>Verification of the initial tests</h2>
+<div class="scroll"><table>
+<thead><tr><th>Check</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Unit tests (<code>pytest</code>, no GPU or data needed)</td><td><span class="pill p-ok">78 passed</span> (49 at the Sprint 1 audit)</td></tr>
+<tr><td>Verifier self-test on real data: true claims accepted, invented SMS, wrong camera make, fake hash, path traversal and <code>DELETE</code> refused</td><td><span class="pill p-ok">12 / 12</span></td></tr>
+<tr><td>Sprint 1 proof of concept reproduced independently on the GPU</td><td><span class="pill p-ok">9 / 0 / 39</span> identical, 30.9 s, 5.22 GB</td></tr>
+<tr><td>Integrity of every extracted file after inspection (39 items)</td><td><span class="pill p-ok">0 mismatches</span></td></tr>
+<tr><td>Phone data re-inspected after the move into case folders</td><td><span class="pill p-ok">0 mismatches</span></td></tr>
+<tr><td>GUI guards: answer-key text and path traversal requests</td><td><span class="pill p-ok">both refused (403)</span></td></tr>
+</tbody></table></div>
+
+<h2><span class="n">4</span>The case database</h2>
+<p>Everything lives in <code>data/cases/&lt;case&gt;/</code>. A case is one investigation. Its devices were grouped only where the source itself ties them together (one scenario, one CTF year, one challenge).</p>
+<pre>data/cases/&lt;case_id&gt;/
+├── case.json                 registry entry and fetch status
+├── context/brief/            what the examiner is told; agents read this
+├── context/answer_key/       solutions; never given to agents (scoring and labels only)
+├── context/acquisition/      imaging logs (FTK Imager, EWF headers)
+├── evidence/&lt;evidence_id&gt;/   fs/ (sandbox), MANIFEST.json, INSPECTION.json, FILELIST.jsonl.gz
+└── workspace/                memory.json, runs/&lt;run&gt;/trace.jsonl + findings, reports/*.md</pre>
+
+<div class="scroll"><table>
+<thead><tr><th>Case</th><th>Evidence items</th><th class="num">Files</th><th>Brief</th><th>Answer key</th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="5">Investigation scenarios</td></tr>
+<tr><td><b>M57-Patents</b> (2009)</td><td>Charlie, Jo, Pat, Terry Windows XP workstations; 4 USB drives</td><td class="num">9,676</td><td>Search warrant affidavit, 4 detective reports</td><td>Instructor packet, 3 scenario decks</td></tr>
+<tr><td><b>NIST Data Leakage</b> (2015)</td><td>Windows 7 PC, 2 USB drives <span class="small">(CD-R pending, UDF)</span></td><td class="num">1,829</td><td>NIST case page</td><td><code>leakage-answers.pdf</code></td></tr>
+<tr><td><b>Lone Wolf</b> (2018)</td><td>Windows 10 laptop</td><td class="num">1,666</td><td>Scenario README</td><td>Forensic report bundle; teacher guide locked</td></tr>
+<tr><td><b>Narcos</b> (2019)</td><td>3 Windows PCs + 1 PC after CCleaner</td><td class="num">5,299</td><td>—</td><td>Teacher guide locked</td></tr>
+<tr><td><b>Owl</b> (2019)</td><td>Desktop HD1 (68 GB), LG Nexus 5</td><td class="num">3,188</td><td>—</td><td>4 scenario creation logs</td></tr>
+<tr class="group"><td colspan="5">Challenge and CTF cases</td></tr>
+<tr><td><b>DFRWS 2021</b></td><td>Card skimmer microSD, Raspberry Pi microSD, Galaxy S10</td><td class="num">11,644</td><td>README, challenge details</td><td>—</td></tr>
+<tr><td><b>Magnet CTF 2019</b></td><td>Windows desktop, Android</td><td class="num">2,179</td><td>README</td><td>—</td></tr>
+<tr><td><b>Magnet CTF 2020</b></td><td>Windows PC, Android, iPhone, Google Takeout</td><td class="num">9,384</td><td>README</td><td>—</td></tr>
+<tr><td><b>Magnet CTF 2021</b></td><td>iPhone 8</td><td class="num">2,653</td><td>README, extraction report</td><td>—</td></tr>
+<tr><td><b>Magnet CTF 2022</b></td><td>HP Windows laptop, Android, iPhone 8</td><td class="num">9,160</td><td>README, extraction report</td><td>—</td></tr>
+<tr class="group"><td colspan="5">Reference devices (one phone each, documented activity)</td></tr>
+<tr><td>Android 9 · 10 · 13 · 14</td><td>Pixel 3 (×2), Android 13 and 14 phones</td><td class="num">27,671</td><td>Image-creation documents</td><td>—</td></tr>
+<tr><td>iOS 13.3.1 · 13.4.1 · 16 · 17</td><td>4 iPhones, full file systems</td><td class="num">17,994</td><td>Image-creation documents</td><td>—</td></tr>
+</tbody></table></div>
+
+<h3>Extracted files by platform</h3>
+<div class="bars" role="img" aria-label="Extracted files by platform, scale 0 to 40,000">
+  <div class="bar"><span>Android (9)</span><div class="track"><div class="fill" style="width:99.8%"></div></div><span class="v">39,923</span></div>
+  <div class="bar"><span>iOS (7)</span><div class="track"><div class="fill" style="width:68.0%"></div></div><span class="v">27,194</span></div>
+  <div class="bar"><span>Windows (14)</span><div class="track"><div class="fill" style="width:62.3%"></div></div><span class="v">24,912</span></div>
+  <div class="bar"><span>Linux (1)</span><div class="track"><div class="fill" style="width:16.2%"></div></div><span class="v">6,464</span></div>
+  <div class="bar"><span>Removable (7)</span><div class="track"><div class="fill" style="width:9.2%"></div></div><span class="v">3,668</span></div>
+  <div class="bar"><span>Takeout (1)</span><div class="track"><div class="fill" style="width:0.5%"></div></div><span class="v">182</span></div>
+  <div class="axis"><span></span><div><span>0</span><span>10k</span><span>20k</span><span>30k</span><span>40k</span></div><span></span></div>
+</div>
+<p class="small">Bracketed numbers are evidence items. Windows items also contribute most of the 1.41 million file-system timeline entries (Magnet 2022 laptop alone: 324,283; Owl HD1: 303,870).</p>
+
+<h3>How the data was acquired</h3>
+<ul>
+<li>All sources are public research and teaching images from <b>Digital Corpora</b> and <b>NIST CFReDS</b>.</li>
+<li>Disk images up to 45 GB were downloaded with parallel range requests (about 30 MB/s) and deleted after extraction. Owl HD1 (68 GB) was read in place: 31.9 GB transferred in 79 minutes.</li>
+<li>Every file is recorded with its SHA-256, original path, MACB times and inode; deleted recoveries are flagged with a reliability note.</li>
+<li>Credential stores are never copied: <code>SAM</code>, <code>SECURITY</code>, <code>/etc/shadow</code>, keychains, password files, pagefile and hibernation files.</li>
+<li>Digital Corpora's Lone Wolf and Narcos teacher guides are password-protected for instructors. They were not opened; a note in each case says where to place them if the password is obtained.</li>
+</ul>
+
+<h2><span class="n">5</span>The vision agent on real cases</h2>
+<div class="scroll"><table>
+<thead><tr><th>Run</th><th>Case</th><th class="num">Items</th><th class="num">Verified</th><th class="num">Rejected</th><th class="num">Observations</th><th class="num">Time</th></tr></thead>
+<tbody>
+<tr><td class="mono">20261006-160644</td><td>Android 10 reference phone (2 images)</td><td class="num">1</td><td class="num">9</td><td class="num">0</td><td class="num">39</td><td class="num">55 s</td></tr>
+<tr><td class="mono">20261006-161503</td><td>M57-Patents, 3 PCs (4 images each)</td><td class="num">3</td><td class="num">5</td><td class="num">0</td><td class="num">182</td><td class="num">102 s</td></tr>
+<tr><td class="mono">20261006-161949</td><td>M57-Patents, all 8 items (5 images each)</td><td class="num">8</td><td class="num">41</td><td class="num">0</td><td class="num">622</td><td class="num">250 s</td></tr>
+</tbody></table></div>
+
+<h3>Examples of what the agent found</h3>
+<div class="cols">
+  <div class="box"><span class="pill p-ok">verified</span>
+    <h3>Text in an image tied to a database row</h3>
+    <p class="small">Android 10 · <span class="mono">Screenshot_20200213-213310.png</span></p>
+    <p>OCR read “Super Secret Message”. The verifier re-ran <code>SELECT "title" FROM "favorites" WHERE rowid = 42</code> on the Pixel launcher database and got “Super Secret Message Apps”: a user-created folder.</p></div>
+  <div class="box"><span class="pill p-ok">verified</span>
+    <h3>Text in a patent image tied to a CSV line</h3>
+    <p class="small">M57 · Charlie · <span class="mono">Quantum Cryptography/20090196419-001.tif</span></p>
+    <p>Six OCR lines matched lines of <code>MNspreadsheetTagged.csv</code> in Charlie's Downloads, cited by line number. This used the new text-file index, which matters on Windows where SQLite is rare.</p></div>
+  <div class="box"><span class="pill p-warn">not in context</span>
+    <h3>A camera the briefing never mentions</h3>
+    <p class="small">M57 · Jo's favourites USB · <span class="mono">DSC00009–13.JPG</span></p>
+    <p>Verified EXIF shows a Sony CYBERSHOT camera. The briefing mentions only USB drives, so the agent flags it as a new device to examine.</p></div>
+  <div class="box"><span class="pill p-bad">outside timeframe</span>
+    <h3>Dates outside the period under investigation</h3>
+    <p class="small">M57 · Charlie's USB · <span class="mono">Immortality/us005026637-001.tif</span></p>
+    <p>The briefing covers 14 Oct 2009 to 11 Jan 2010 (with margin). Verified EXIF dates of 1999 and 2005 are flagged, which separates downloaded material from activity during the case.</p></div>
+</div>
+
+<h3>How the context comparison works</h3>
+<div class="scroll"><table>
+<thead><tr><th>Link</th><th>Rule</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p-ok">corroborates</span></td><td>A verified finding contains a person, e-mail, phone, file name or device named in the brief.</td></tr>
+<tr><td><span class="pill p-tag">keyword match</span></td><td>Weaker: a verified finding contains a recurring keyword of the brief.</td></tr>
+<tr><td><span class="pill p-bad">outside timeframe</span></td><td>A verified timestamp falls outside the period the brief describes.</td></tr>
+<tr><td><span class="pill p-warn">not in context</span></td><td>A verified camera model the brief never mentions.</td></tr>
+<tr><td><span class="pill p-warn">new lead</span></td><td>A verified GPS position or confirmed text with no counterpart in the brief.</td></tr>
+<tr><td><span class="pill p-obs">unverified mention</span></td><td>A model observation mentions a brief entity. Follow up; not evidence.</td></tr>
+</tbody></table></div>
+<p>The context is built only from the brief, never the answer key, so the agent cannot simply find what it was told the answer is. Links are saved to <code>workspace/memory.json</code> after every image and never change a finding's verification status.</p>
+
+<h2><span class="n">6</span>The web console</h2>
+<p>Start it with <code>python main.py gui</code> and open <span class="mono">http://127.0.0.1:8765</span>. It binds to localhost, serves evidence through the sandbox, and shows answer-key text only after an explicit “reveal” click.</p>
+<div class="cols">
+  <div class="box"><h3>Live agent</h3><ul>
+    <li>Start a run on any case and choose evidence items, image count, OCR and VLM.</li>
+    <li>Step feed: EXIF, OCR, index lookups, model answer, claims, verification, context links.</li>
+    <li>Image viewer with OCR boxes: green when backed by evidence, amber when not, dashed when ignored.</li>
+    <li>Context panel: what the agent was told, and the links it draws for the current image.</li></ul></div>
+  <div class="box"><h3>Other views</h3><ul>
+    <li><b>Memory</b>: brief entities with sources, and every link, filterable.</li>
+    <li><b>Findings</b>: status, claim, citations and context per run.</li>
+    <li><b>Report</b>: the rendered Markdown report.</li>
+    <li><b>Documents</b>: brief, acquisition logs, locked answer key.</li>
+    <li><b>Evidence</b>: categories, file systems, acquisition MD5, top images.</li></ul></div>
+</div>
+
+<h2><span class="n">7</span>The dataset for deep learning</h2>
+<p><code>python main.py dataset</code> writes <code>data/datasets/&lt;date&gt;/</code> with JSONL tables and a datasheet. Bytes stay in the case folders; the tables hold metadata, text and labels.</p>
+<div class="scroll"><table>
+<thead><tr><th>Table</th><th class="num">Rows</th><th>Contents</th></tr></thead>
+<tbody>
+<tr><td class="mono">files</td><td class="num">102,343</td><td>Every extracted file: category, size, SHA-256, MACB, deleted flag, duplicate marker</td></tr>
+<tr><td class="mono">images</td><td class="num">18,919</td><td>Photos, screenshots, app and recovered images</td></tr>
+<tr><td class="mono">documents</td><td class="num">42,302</td><td>Documents, e-mail, logs, configuration, text artefacts</td></tr>
+<tr><td class="mono">fs_timelines</td><td class="num">22</td><td>Pointers to 1,409,882 directory entries with MACB times, incl. deleted</td></tr>
+<tr><td class="mono">findings</td><td class="num">898</td><td>Agent claims with verified / rejected / uncorroborated labels and context links</td></tr>
+<tr><td class="mono">context_brief</td><td class="num">27</td><td>Brief text per case (model input)</td></tr>
+<tr><td class="mono">answer_keys</td><td class="num">176</td><td>Answer-key text (evaluation only)</td></tr>
+<tr><td class="mono">cases · evidence</td><td class="num">18 · 39</td><td>Metadata and split assignment</td></tr>
+</tbody></table></div>
+<h3>Splits</h3>
+<p>Splits are assigned <b>per case</b>, so no investigation appears in two splits. Each split holds a computer scenario, a multi-device CTF and Android and iOS reference phones.</p>
+<div class="scroll"><table>
+<thead><tr><th>Split</th><th class="num">Cases</th><th class="num">Images</th><th>Cases included</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p-tag">train</span></td><td class="num">10</td><td class="num">13,257</td><td>M57-Patents, Narcos, Owl, DFRWS 2021, Magnet 2020, Magnet 2021, Android 9, Android 10, iOS 13.3.1, iOS 13.4.1</td></tr>
+<tr><td><span class="pill p-tag">val</span></td><td class="num">4</td><td class="num">2,019</td><td>Lone Wolf, Magnet 2019, Android 13, iOS 16</td></tr>
+<tr><td><span class="pill p-tag">test</span></td><td class="num">4</td><td class="num">3,643</td><td>NIST Data Leakage, Magnet 2022, Android 14, iOS 17</td></tr>
+</tbody></table></div>
+<p class="small">18,919 images in total. Rerun <code>python main.py dataset</code> after new runs or downloads to refresh every table.</p>
+
+<h3>Learning tasks this data supports</h3>
+<div class="cols">
+  <div class="box"><h3>Ready now</h3><ul>
+    <li><b>Artefact classification</b>: 21 file categories across 6 platforms.</li>
+    <li><b>Corroboration scoring</b>: learn which OCR/VLM text will verify, from the 898 labelled findings (grows with every run).</li>
+    <li><b>Image triage</b>: rank evidence images by relevance (user photo, screenshot, document scan, cache).</li>
+    <li><b>Timeline anomaly detection</b>: 1.41 M MACB entries, including deleted and post-CCleaner states.</li></ul></div>
+  <div class="box"><h3>Needs labels first</h3><ul>
+    <li><b>Case question answering</b>: brief in, answer key as the reference. NIST and M57 have the best keys.</li>
+    <li><b>Entity linking</b> across devices (same person on phone and PC).</li>
+    <li><b>Relevance labels</b> per file from the Lone Wolf tagged-file listings and answer keys.</li>
+    <li>Deduplicate by SHA-256 (<code>duplicate_of</code>) before training.</li></ul></div>
+</div>
+
+<h2><span class="n">8</span>Open issues</h2>
+<div class="scroll"><table>
+<thead><tr><th>Severity</th><th>Issue</th><th>Where</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p-warn">medium</span></td><td>The verifier shares the agent's bridge and hash cache (keyed on size and modification time), so its hash check is not independent within a run.</td><td class="mono">base_agent.py, forensic_bridge.py</td><td>Fresh bridge and uncached hashes in the auditor.</td></tr>
+<tr><td><span class="pill p-warn">medium</span></td><td>The SQLite <code>-wal</code> file changes query results but is not covered by <code>expected_hash</code>.</td><td class="mono">forensic_bridge.py</td><td>Hash side files into the citation.</td></tr>
+<tr><td><span class="pill p-warn">medium</span></td><td><code>verify-selftest</code> and the legacy <code>pipeline</code> command only work on <code>android_10</code>.</td><td class="mono">main.py</td><td>Build test claims from any case.</td></tr>
+<tr><td><span class="pill p-obs">low</span></td><td>EXIF byte-offset citations point at the first occurrence (three timestamps share offset 235).</td><td class="mono">vision_agent.py</td><td>Compute the real tag offset.</td></tr>
+<tr><td><span class="pill p-obs">low</span></td><td>Context entity extraction is rule-based; keywords can be noisy and Lone Wolf, Narcos and Owl have thin briefs.</td><td class="mono">case_context.py</td><td>Optional local LLM pass, labelled as such.</td></tr>
+<tr><td><span class="pill p-obs">low</span></td><td>Text inside DOCX and PDF evidence is not indexed for corroboration.</td><td class="mono">text_index.py</td><td>Extract text with a cited locator.</td></tr>
+<tr><td><span class="pill p-obs">low</span></td><td>Recovered deleted images can be overwritten; 5 failed to open in the M57 run (logged, not counted as evidence).</td><td class="mono">rank_images</td><td>Rank deleted images after live ones.</td></tr>
+<tr><td><span class="pill p-tag">data</span></td><td>NIST CD-R is pure UDF 2.x; The Sleuth Kit cannot read it.</td><td class="mono">registry.py</td><td>Add a UDF reader.</td></tr>
+<tr><td><span class="pill p-tag">data</span></td><td>Not yet registered: macOS (Tuck, Magnet 2021), Magnet 2022 Linux (.7z), DFRWS QNAP NAS (RAID), memory images, encrypted iTunes backups, raw Android 7/8 dumps.</td><td>—</td><td>Later sprints.</td></tr>
+<tr><td><span class="pill p-tag">housekeeping</span></td><td>Not a git repository. The folder rename left <code>.venv/Scripts/*.exe</code> launchers stale (use <code>python -m pip</code>).</td><td>—</td><td><code>git init</code> + <code>.gitignore</code>.</td></tr>
+</tbody></table></div>
+
+<h2><span class="n">9</span>First steps (next session)</h2>
+<p>In order, before new agents are added:</p>
+<ol class="steps">
+  <li><div><b>Put the project under version control.</b> <code>git init</code>, ignore <code>.venv/</code>, <code>data/cases/</code>, <code>data/datasets/</code>, <code>data/_spool/</code>, <code>data/outputs/</code>. Recreate the venv to fix the stale launchers.</div></li>
+  <li><div><b>Fix the three medium issues.</b> Independent verifier bridge without hash cache, WAL/journal hashing in citations, a self-test that works on any case. Keep 0 rejected on real data.</div></li>
+  <li><div><b>Run the vision agent across every case.</b> <code>python main.py investigate --case &lt;id&gt; --limit 25</code> for all 18 cases. This grows the labelled findings table from 898 to several thousand rows.</div></li>
+  <li><div><b>Index document text.</b> DOCX/PDF text with citable locators, so OCR can be confirmed against office documents on the Windows images.</div></li>
+  <li><div><b>Refresh catalogue and dataset.</b> <code>python main.py cases catalog</code> and <code>python main.py dataset</code>; check the datasheet totals.</div></li>
+</ol>
+
+<h2><span class="n">10</span>Next phases</h2>
+<div class="scroll"><table>
+<thead><tr><th>Phase</th><th>Deliverables</th><th>Done when</th></tr></thead>
+<tbody>
+<tr><td><b>Sprint 2</b><br><span class="small">artefact agents</span></td><td><b>AppArtifactAgent</b>: parsers for SMS, contacts, call logs, WhatsApp, Chrome/Safari/IE history, KnowledgeC, Windows registry (USB devices, recent files, user accounts), event logs, Prefetch, LNK. <b>FileSystemAgent</b>: MACB analysis from FILELIST, extension/magic mismatch, hidden and deleted files, SQLite freelist carving. Both emit trace events and context links like the vision agent.</td><td>Documented SMS of Android 10 recovered; M57 USB activity found in the registry; 0 rejected.</td></tr>
+<tr><td><b>Sprint 3</b><br><span class="small">correlation and audit</span></td><td><b>TimelineAgent</b>: one UTC timeline per case across all devices, from verified findings only. <b>OrchestratorAuditorAgent</b> (the final agent): plans the agents per case, re-verifies every finding with fresh hashes, drops anything not verified, writes the case report, and scores it against the answer key.</td><td>A case report for NIST Data Leakage and M57 with a measured score against their answer keys.</td></tr>
+<tr><td><b>Sprint 4</b><br><span class="small">learning</span></td><td>Baselines on the exported dataset: artefact classifier, corroboration scorer, image triage model, timeline anomaly detector. Evaluate on the test cases only.</td><td>Reported metrics on the test split, with no case leakage.</td></tr>
+<tr><td><b>Sprint 5</b><br><span class="small">coverage</span></td><td>UDF CD reader, APFS/macOS images, Linux 7z, NAS RAID assembly, memory images (Volatility), encrypted iTunes backups with the documented passwords, dual-GPU mode on the RTX 4060.</td><td>All 40 items plus the new sources extracted with 0 hash mismatches.</td></tr>
+</tbody></table></div>
+
+<h2><span class="n">11</span>How to run</h2>
+<pre>cd "C:\Forensic - Orchestrator\forensic_agent"
+.venv\Scripts\python main.py cases list                                # cases, evidence, fetch status
+.venv\Scripts\python main.py cases build --cases all --groups light    # documents + evidence (resumable)
+.venv\Scripts\python main.py cases build --cases narcos --groups heavy # large spooled images
+.venv\Scripts\python main.py investigate --case m57_patents --limit 5  # vision agent over a case
+.venv\Scripts\python main.py gui                                       # http://127.0.0.1:8765
+.venv\Scripts\python main.py dataset                                   # ML tables -> data\datasets\&lt;date&gt;\
+.venv\Scripts\python -m pytest                                         # 78 unit tests</pre>
+
+<h2><span class="n">12</span>Environment</h2>
+<div class="scroll"><table>
+<tbody>
+<tr><th>GPU</th><td>NVIDIA GeForce RTX 5080 Laptop, 16 GB; software budget 12 GB on <code>cuda:0</code>; peak 5.5 GB per run</td></tr>
+<tr><th>Software</th><td>Windows 11, Python 3.12.10, torch 2.11.0+cu128, transformers 5.18.0, bitsandbytes 0.50.2, EasyOCR 1.7.2, pytsk3 (TSK 4.15), libewf-python 20260924</td></tr>
+<tr><th>Models</th><td>Qwen/Qwen2.5-VL-3B-Instruct (4-bit, cached; run with <code>HF_HUB_OFFLINE=1</code> because of TLS inspection on Hub calls), EasyOCR en + es</td></tr>
+<tr><th>Storage</th><td><code>data/cases</code> 20 GB; 179 GB free on C:</td></tr>
+<tr><th>Handover</th><td><code>HANDOVER.md</code> (state, §1b case database, copy-paste prompts for Sprints 2 and 3) and <code>README.md</code></td></tr>
+</tbody></table></div>
+
+<p class="foot small">Sources: Digital Corpora (M57-Patents, Lone Wolf, Narcos, Owl, Hickman reference images, Magnet Forensics CTF images, DFRWS 2021) and NIST CFReDS (Data Leakage). All figures were read from <code>data/cases/catalog.sqlite</code>, the run files and the test suite on 6 October 2026.</p>
+</main>
