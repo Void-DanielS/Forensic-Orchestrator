@@ -113,3 +113,68 @@ HANDOVER.md                         sprint state and roadmap
 tests/                              unit tests (verifier, bridge, scraper, schemas)
 docs/                               data dictionary, interchange standard, JSON Schemas
 ```
+
+## Project scope and sprints
+
+ForensiAgent-Multimodal is a multi-agent orchestration framework for automated analysis of logical forensic images
+(Android/iOS extractions, disk logical backups, system file trees) with a zero-hallucination guarantee.
+
+### Hardware
+
+* **Sprint 1 (current):** a single GPU, `cuda:0` RTX 5070 with ~12 GB VRAM. All Phase 1 components (VLM, OCR,
+  reasoning/embeddings) fit on it through 4-bit/8-bit quantization (`bitsandbytes`) and careful memory management.
+* **Target:** dual GPU, `cuda:0` RTX 5070 for text and orchestration, `cuda:1` RTX 4060 for VLM and vision.
+* **Device selection** (`src/config/settings.py`): `SINGLE_GPU_MODE = True` runs everything on `cuda:0`. Switching
+  to dual GPU only requires setting it to `False` (or `FORENSI_SINGLE_GPU=0`); see `HANDOVER.md` §6.
+
+### Agent architecture (5 specialist agents)
+
+| Agent | Responsibility | Sprint |
+|---|---|---|
+| `MultimodalVisionAgent` | image and screenshot artifacts: EXIF metadata, OCR, VLM description | **1 (delivered)** |
+| `FileSystemAgent` | directory trees, MACB timestamps, hashes, hidden files | 2 |
+| `AppArtifactAgent` | SQLite databases, JSON, XML, chat logs, browser history | 2 |
+| `TimelineAgent` | temporal correlation across multi-source findings | 3 |
+| `OrchestratorAuditorAgent` | task orchestration, strict heuristic audit, final Markdown report | 3 |
+
+### Sprint 1 scope
+
+**A. Case-based dataset fetcher** (`src/utils/dataset_scraper.py`, plus `src/utils/disk_image.py` and `src/cases/`)
+downloads public practice forensic images tied to real DFIR case scenarios (NIST CFReDS, Digital Corpora, Magnet
+Forensics CTFs). Each fetch is inspected to confirm that databases (`.db`, `.sqlite`), system logs and geotagged or
+text-bearing images are present and uncorrupted. Evidence is stored per case in `data/cases/<case_id>/evidence/`
+(the original plan named this folder `data/raw_images/`).
+
+**B. Deterministic heuristic verification engine** (`src/verification/heuristic_verifier.py`). Every finding must be
+backed by ground truth from the extraction. The engine:
+
+* receives a citation `{file_path, byte_offset / line_number / sql_query, expected_hash, raw_text_snippet}`;
+* opens and inspects the file inside the logical sandbox;
+* re-executes the exact regex match, SQL query or byte-level comparison;
+* returns `verified: True/False` with confirmation metadata before any finding is accepted.
+
+**C. Forensic tooling bridge** (`src/bridge/forensic_bridge.py`), Python wrappers around lightweight forensic tools:
+
+* `sqlite3` in read-only mode (URI `filename?mode=ro`, on working copies so evidence is never touched);
+* `exiftool` / Pillow / piexif for image metadata and geolocation;
+* native OS / `pytsk3` / `dfvfs` traversal for logical directory browsing.
+
+**D. `MultimodalVisionAgent`** (`src/agents/vision_agent.py`), inheriting from `BaseAgent` and running on `cuda:0`
+within the ~12 GB budget:
+
+* **inputs:** visual artifacts (photos, messaging screenshots, suspicious images);
+* **operations:** extract EXIF and camera metadata; OCR embedded text; run VLM inference (Qwen2.5-VL in
+  4-bit/8-bit) to describe the visual context; emit structured JSON findings with the verification metadata the
+  `HeuristicVerificationEngine` requires.
+
+### Sprint 1 plan
+
+1. **Environment:** `requirements.txt` (torch, transformers, accelerate, bitsandbytes, pillow, pydantic, easyocr;
+   sqlite3 ships with Python) and `src/config/settings.py` for single-GPU execution with dual-GPU flags.
+2. **Dataset acquisition and inspection:** run the fetcher and confirm databases and case images are present.
+3. **Core engine:** the heuristic verifier and the forensic bridge.
+4. **Vision agent and pipeline test:** run `main.py` end to end (dataset → vision agent → heuristic verifier) on
+   `cuda:0` with quantization.
+5. **Handover documentation** (`HANDOVER.md`): what was built and tested, the verified dataset structure, how to
+   enable dual-GPU mode once the RTX 4060 is installed, and the plan for Sprint 2 (`AppArtifactAgent`,
+   `FileSystemAgent`) and Sprint 3 (`TimelineAgent`, `OrchestratorAuditorAgent`).
