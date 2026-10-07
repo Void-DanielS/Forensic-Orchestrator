@@ -1,0 +1,246 @@
+{
+  "$defs": {
+    "Citation": {
+      "description": "Pointer to ground truth inside the logical sandbox.\n\n``file_path`` is relative to the sandbox root. ``expected_hash`` is the SHA-256 of the\nwhole file as seen by the agent; a mismatch means the evidence changed and the\ncitation fails. Exactly one locator field must be set, matching ``locator_type``.",
+      "properties": {
+        "file_path": {
+          "title": "File Path",
+          "type": "string"
+        },
+        "locator_type": {
+          "enum": [
+            "byte_offset",
+            "line_number",
+            "sql_query",
+            "regex",
+            "exif_tag"
+          ],
+          "title": "Locator Type",
+          "type": "string"
+        },
+        "byte_offset": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Byte Offset"
+        },
+        "line_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Number"
+        },
+        "sql_query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sql Query"
+        },
+        "sql_params": {
+          "items": {},
+          "title": "Sql Params",
+          "type": "array"
+        },
+        "regex": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Regex"
+        },
+        "exif_tag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exif Tag"
+        },
+        "expected_hash": {
+          "title": "Expected Hash",
+          "type": "string"
+        },
+        "raw_text_snippet": {
+          "title": "Raw Text Snippet",
+          "type": "string"
+        },
+        "snippet_encoding": {
+          "default": "utf-8",
+          "enum": [
+            "utf-8",
+            "hex"
+          ],
+          "title": "Snippet Encoding",
+          "type": "string"
+        },
+        "match_mode": {
+          "default": "exact",
+          "enum": [
+            "exact",
+            "contains"
+          ],
+          "title": "Match Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "locator_type",
+        "expected_hash",
+        "raw_text_snippet"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "FindingStatus": {
+      "enum": [
+        "pending",
+        "verified",
+        "rejected",
+        "uncorroborated"
+      ],
+      "title": "FindingStatus",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "finding_id": {
+      "title": "Finding Id",
+      "type": "string"
+    },
+    "agent": {
+      "title": "Agent",
+      "type": "string"
+    },
+    "artifact_path": {
+      "title": "Artifact Path",
+      "type": "string"
+    },
+    "category": {
+      "title": "Category",
+      "type": "string"
+    },
+    "claim": {
+      "title": "Claim",
+      "type": "string"
+    },
+    "value": {
+      "default": null,
+      "title": "Value"
+    },
+    "citations": {
+      "items": {
+        "$ref": "#/$defs/Citation"
+      },
+      "title": "Citations",
+      "type": "array"
+    },
+    "observed_text": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed Text"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
+    },
+    "status": {
+      "$ref": "#/$defs/FindingStatus",
+      "default": "pending"
+    },
+    "verification": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Verification",
+      "type": "array"
+    },
+    "context_links": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Context Links",
+      "type": "array"
+    },
+    "evidence_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evidence Id"
+    },
+    "created_utc": {
+      "title": "Created Utc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent",
+    "artifact_path",
+    "category",
+    "claim"
+  ],
+  "title": "Finding",
+  "type": "object"
+}

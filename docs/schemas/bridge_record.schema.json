@@ -1,0 +1,237 @@
+{
+  "$defs": {
+    "EpochKind": {
+      "enum": [
+        "unix_s",
+        "unix_ms",
+        "unix_us",
+        "unix_ns",
+        "webkit_us",
+        "windows_filetime",
+        "cocoa_s",
+        "cocoa_ns",
+        "hfs_s",
+        "iso8601",
+        "exif",
+        "local_text"
+      ],
+      "title": "EpochKind",
+      "type": "string"
+    },
+    "ForensicTimestamp": {
+      "description": "A stored time value, never silently converted.\n\n``utc`` is set only when the source defines an absolute instant (numeric epochs, ISO-8601 with\noffset, EXIF with an ``OffsetTime*`` tag). ``local`` holds wall-clock text otherwise.",
+      "properties": {
+        "raw": {
+          "description": "value exactly as stored (int, float or str)",
+          "title": "Raw"
+        },
+        "epoch": {
+          "$ref": "#/$defs/EpochKind"
+        },
+        "utc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO-8601 UTC instant, e.g. 2020-02-09T18:23:53+00:00",
+          "title": "Utc"
+        },
+        "local": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO-8601 wall-clock time without offset",
+          "title": "Local"
+        },
+        "utc_offset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'+HH:MM' when known",
+          "title": "Utc Offset"
+        }
+      },
+      "required": [
+        "raw",
+        "epoch"
+      ],
+      "title": "ForensicTimestamp",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": "fdx/1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "description": "bridge accessor that produced the record, e.g. 'sqlite.cell', 'exif.tag'",
+      "title": "Source",
+      "type": "string"
+    },
+    "file_path": {
+      "description": "sandbox-relative path of the file the value was read from",
+      "title": "File Path",
+      "type": "string"
+    },
+    "sha256": {
+      "title": "Sha256",
+      "type": "string"
+    },
+    "locator_type": {
+      "enum": [
+        "byte_offset",
+        "line_number",
+        "sql_query",
+        "regex",
+        "exif_tag"
+      ],
+      "title": "Locator Type",
+      "type": "string"
+    },
+    "byte_offset": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Byte Offset"
+    },
+    "line_number": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Line Number"
+    },
+    "sql_query": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sql Query"
+    },
+    "sql_params": {
+      "items": {},
+      "title": "Sql Params",
+      "type": "array"
+    },
+    "regex": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Regex"
+    },
+    "exif_tag": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Exif Tag"
+    },
+    "raw_text_snippet": {
+      "title": "Raw Text Snippet",
+      "type": "string"
+    },
+    "snippet_encoding": {
+      "default": "utf-8",
+      "enum": [
+        "utf-8",
+        "hex"
+      ],
+      "title": "Snippet Encoding",
+      "type": "string"
+    },
+    "match_mode": {
+      "default": "exact",
+      "enum": [
+        "exact",
+        "contains"
+      ],
+      "title": "Match Mode",
+      "type": "string"
+    },
+    "value": {
+      "default": null,
+      "title": "Value"
+    },
+    "field": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "logical field name, e.g. 'sms.body', 'GPS.GPSLatitude'",
+      "title": "Field"
+    },
+    "timestamps": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ForensicTimestamp"
+      },
+      "title": "Timestamps",
+      "type": "object"
+    },
+    "attributes": {
+      "additionalProperties": true,
+      "description": "table, column, rowid, mime, ...",
+      "title": "Attributes",
+      "type": "object"
+    }
+  },
+  "required": [
+    "source",
+    "file_path",
+    "sha256",
+    "locator_type",
+    "raw_text_snippet"
+  ],
+  "title": "BridgeRecord",
+  "type": "object"
+}

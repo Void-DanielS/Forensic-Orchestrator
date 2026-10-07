@@ -1,0 +1,269 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "description": "A file inside one evidence item's sandbox, pinned by its hash.",
+      "properties": {
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "path": {
+          "description": "sandbox-relative POSIX path",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        }
+      },
+      "required": [
+        "case_id",
+        "evidence_id",
+        "path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "ContentPart": {
+      "properties": {
+        "type": {
+          "enum": [
+            "text",
+            "image"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ContentPart",
+      "type": "object"
+    },
+    "Message": {
+      "properties": {
+        "role": {
+          "enum": [
+            "system",
+            "user",
+            "assistant"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "content": {
+          "items": {
+            "$ref": "#/$defs/ContentPart"
+          },
+          "title": "Content",
+          "type": "array"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ],
+      "title": "Message",
+      "type": "object"
+    },
+    "Provenance": {
+      "properties": {
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "evidence_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Id"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "finding_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Finding Ids",
+          "type": "array"
+        },
+        "artifacts": {
+          "description": "every evidence file the sample uses",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "generator": {
+          "description": "exporter that built the sample, e.g. 'finetune.image_text_grounding'",
+          "title": "Generator",
+          "type": "string"
+        },
+        "dataset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "source export, e.g. data/datasets/20261006",
+          "title": "Dataset"
+        },
+        "created_utc": {
+          "title": "Created Utc",
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "generator"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Split": {
+      "enum": [
+        "train",
+        "val",
+        "test"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "TaskType": {
+      "enum": [
+        "image_text_grounding",
+        "finding_generation",
+        "evidence_status_classification"
+      ],
+      "title": "TaskType",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": "fdx/1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sample_id": {
+      "default": "",
+      "title": "Sample Id",
+      "type": "string"
+    },
+    "task": {
+      "$ref": "#/$defs/TaskType"
+    },
+    "split": {
+      "$ref": "#/$defs/Split"
+    },
+    "messages": {
+      "items": {
+        "$ref": "#/$defs/Message"
+      },
+      "title": "Messages",
+      "type": "array"
+    },
+    "target": {
+      "default": null,
+      "description": "structured form of the assistant answer",
+      "title": "Target"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "target_status": {
+      "description": "verification status of the content the target is built from",
+      "enum": [
+        "verified",
+        "rejected",
+        "uncorroborated"
+      ],
+      "title": "Target Status",
+      "type": "string"
+    },
+    "weight": {
+      "default": 1.0,
+      "title": "Weight",
+      "type": "number"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    }
+  },
+  "required": [
+    "task",
+    "split",
+    "messages",
+    "target_status",
+    "provenance"
+  ],
+  "title": "TrainingSample",
+  "type": "object"
+}

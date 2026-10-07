@@ -22,6 +22,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Iterator
 
+from src.schemas.bridge import BridgeRecord
+
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
@@ -204,6 +206,19 @@ class SQLiteBridge:
         finally:
             con.close()
 
+    def cell_record(self, rel: str, table: str, column: str, rowid: int, field: str | None = None) -> BridgeRecord | None:
+        """One cell as a citable FDX record (``None`` when the row or value is absent)."""
+        q = lambda s: '"' + s.replace('"', '""') + '"'  # noqa: E731
+        sql = f"SELECT {q(column)} FROM {q(table)} WHERE rowid = ?"
+        rows = self.query(rel, sql, [rowid], row_limit=1)
+        if not rows or rows[0][0] is None:
+            return None
+        value = rows[0][0]
+        return BridgeRecord(source="sqlite.cell", file_path=rel, sha256=self.sandbox.hash(rel), locator_type="sql_query",
+                            sql_query=sql, sql_params=[rowid], raw_text_snippet=str(value), value=value,
+                            field=field or f"{table}.{column}",
+                            attributes={"table": table, "column": column, "rowid": rowid})
+
     def cleanup(self) -> None:
         shutil.rmtree(self.workdir, ignore_errors=True)
 
@@ -254,6 +269,15 @@ class ImageMetadataBridge:
                 name = piexif.TAGS.get(ifd, {}).get(tag_id, {}).get("name", f"Tag{tag_id}")
                 out[f"{ifd}.{name}"] = value
         return out
+
+    def exif_record(self, rel: str, tag: str) -> BridgeRecord | None:
+        """One EXIF tag (``"<IFD>.<TagName>"``) as a citable FDX record."""
+        raw = self.raw_exif(rel)
+        if tag not in raw:
+            return None
+        snippet = render_exif_value(raw[tag])
+        return BridgeRecord(source="exif.tag", file_path=rel, sha256=self.sandbox.hash(rel), locator_type="exif_tag",
+                            exif_tag=tag, raw_text_snippet=snippet, value=snippet, field=tag)
 
     def exif(self, rel: str) -> dict[str, str]:
         return {k: render_exif_value(v) for k, v in self.raw_exif(rel).items() if k != "1st.JPEGInterchangeFormat"}
@@ -320,6 +344,14 @@ class TextBridge:
     def line(self, rel: str, line_number: int) -> str | None:
         lines = self.read_text(rel).splitlines()
         return lines[line_number - 1] if 1 <= line_number <= len(lines) else None
+
+    def line_record(self, rel: str, line_number: int, field: str | None = None) -> BridgeRecord | None:
+        """One text line (1-based) as a citable FDX record."""
+        text = self.line(rel, line_number)
+        if text is None:
+            return None
+        return BridgeRecord(source="text.line", file_path=rel, sha256=self.sandbox.hash(rel), locator_type="line_number",
+                            line_number=line_number, raw_text_snippet=text, value=text, field=field)
 
 
 @dataclass

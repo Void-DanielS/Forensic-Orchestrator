@@ -198,6 +198,32 @@ def cmd_dataset(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_finetune(a: argparse.Namespace) -> int:
+    from src.datasets.finetune import export_finetune, validate_jsonl
+
+    if a.validate:
+        ok, errors = validate_jsonl(Path(a.validate))
+        print(f"[finetune] {ok} valid sample(s), {len(errors)} error(s)")
+        for e in errors[:20]:
+            print("  " + e)
+        return 1 if errors else 0
+    out = export_finetune(Path(a.dataset) if a.dataset else None)
+    print((out / "FINETUNE_CARD.md").read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_schemas(a: argparse.Namespace) -> int:
+    from src.schemas import BridgeRecord, TrainingSample
+    from src.verification.models import Finding
+
+    out = Path(__file__).parent / "docs" / "schemas"
+    out.mkdir(parents=True, exist_ok=True)
+    for name, model in (("bridge_record", BridgeRecord), ("training_sample", TrainingSample), ("finding", Finding)):
+        (out / f"{name}.schema.json").write_text(json.dumps(model.model_json_schema(), indent=2) + "\n", encoding="utf-8")
+        print(f"[schemas] {out / f'{name}.schema.json'}")
+    return 0
+
+
 def cmd_gui(a: argparse.Namespace) -> int:
     from src.gui.server import serve
 
@@ -240,6 +266,11 @@ def main(argv: list[str] | None = None) -> int:
     pi.set_defaults(fn=cmd_investigate)
     sub.add_parser("dataset", help="export the case database as ML dataset tables (data/datasets/)").set_defaults(
         fn=cmd_dataset)
+    pf = sub.add_parser("finetune", help="build FDX TrainingSample JSONL from a dataset export (or --validate a file)")
+    pf.add_argument("--dataset", default="", help="data/datasets/<date> (default: latest)")
+    pf.add_argument("--validate", default="", help="validate a TrainingSample JSONL file and exit")
+    pf.set_defaults(fn=cmd_finetune)
+    sub.add_parser("schemas", help="write FDX JSON Schemas to docs/schemas/").set_defaults(fn=cmd_schemas)
     pg = sub.add_parser("gui", help="local web interface (http://127.0.0.1:8765)")
     pg.add_argument("--port", type=int, default=8765)
     pg.add_argument("--no-browser", action="store_true")

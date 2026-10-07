@@ -73,8 +73,13 @@ def export(out: Path | None = None) -> Path:
             man = json.loads(mp.read_text(encoding="utf-8"))
             platform = man.get("platform") or man.get("spec", {}).get("platform") or ""
             img = man.get("image") or {}
+            # Mobile manifests store the archive format (zip / tar / tar.gz) in "kind"; normalise to the evidence kind.
+            kind = man.get("kind") or "mobile_extraction"
+            container = None if kind == "disk_image" else kind
+            if container:
+                kind = "cloud_export" if platform == "takeout" else "mobile_extraction"
             evidence.append({"case_id": c.case_id, "evidence_id": eid, "split": sp, "platform": platform,
-                             "kind": man.get("kind", "mobile_extraction"), "title": man.get("title"),
+                             "kind": kind, "container": container or img.get("format"), "title": man.get("title"),
                              "files": len(man["files"]), "filesystems": man.get("filesystems"),
                              "acquisition_md5": (img.get("stored_hashes") or {}).get("MD5")})
             for f in man["files"]:

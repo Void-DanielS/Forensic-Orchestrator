@@ -259,7 +259,9 @@ src/pipeline/investigate.py. Use the existing .venv and the case database in dat
 Run `python -m pytest` and `python main.py verify-selftest` first to confirm a green baseline.
 
 Goal: two agents that subclass BaseAgent and emit Finding objects whose citations the
-HeuristicVerificationEngine re-executes. All DB access goes through bridge.sqlite (working copies;
+HeuristicVerificationEngine re-executes. Follow docs/DATA_INTERCHANGE_STANDARD.md (FDX): every parser /
+bridge accessor returns src.schemas.BridgeRecord (cite with record.to_citation()), times are
+ForensicTimestamp via to_timestamp(), new categories go into src/schemas/common.py and docs/DATA_DICTIONARY.md. All DB access goes through bridge.sqlite (working copies;
 never open evidence in place). Run them across ALL cases, including the Windows / removable / Linux disk images (FILELIST.jsonl.gz has every
 MFT/inode entry with MACB times and deleted flags).
 

@@ -72,6 +72,7 @@ python -m venv .venv
 .venv/Scripts/python main.py investigate --case m57_patents --limit 5    # vision agent over a whole case
 .venv/Scripts/python main.py gui                                         # http://127.0.0.1:8765
 .venv/Scripts/python main.py dataset                                     # ML tables -> data/datasets/<date>/
+.venv/Scripts/python main.py finetune                                    # FDX training samples -> <date>/finetune/
 .venv/Scripts/python -m pytest                                           # unit tests (no GPU / dataset needed)
 ```
 
@@ -79,6 +80,13 @@ In the GUI pick a case, press **Start agent run** and watch each image: OCR boxe
 database cell or text-file line), EXIF/GPS, the VLM answer, every proposed finding and its verification, and the
 links the agent draws to the brief. Other tabs: investigation memory, findings, report, context documents
 (answer key locked), evidence statistics.
+
+## Data dictionary and interchange standard
+
+* [`docs/DATA_DICTIONARY.md`](docs/DATA_DICTIONARY.md): every table, field and controlled vocabulary.
+* [`docs/DATA_INTERCHANGE_STANDARD.md`](docs/DATA_INTERCHANGE_STANDARD.md) (FDX): how the forensic bridge returns
+  citable `BridgeRecord`s, and the `TrainingSample` format for sending data to models for fine-tuning.
+* [`docs/schemas/`](docs/schemas/): JSON Schemas (`python main.py schemas`).
 
 ## Layout
 
@@ -92,6 +100,8 @@ src/pipeline/investigate.py         run an agent over a case (trace, memory, rep
 src/reports/case_report.py          Markdown report
 src/gui/                            local web console
 src/datasets/export.py              ML dataset export
+src/datasets/finetune.py            FDX TrainingSample export, leakage guard, validator
+src/schemas/                        FDX contracts: ArtifactRef, ForensicTimestamp, BridgeRecord, TrainingSample
 src/bridge/forensic_bridge.py       Sandbox, read-only SQLite, EXIF/GPS, text, FS traversal
 src/bridge/text_index.py            inverted index of DB text, used to propose OCR/VLM citations
 src/verification/models.py          Citation / Finding / VerificationResult (pydantic)
@@ -100,5 +110,6 @@ src/agents/base_agent.py            BaseAgent: analyze -> verify -> report
 src/agents/vision_agent.py          MultimodalVisionAgent (EXIF + EasyOCR + Qwen2.5-VL 4-bit)
 main.py                             CLI
 HANDOVER.md                         sprint state and roadmap
-tests/                              unit tests (verifier, bridge, scraper)
+tests/                              unit tests (verifier, bridge, scraper, schemas)
+docs/                               data dictionary, interchange standard, JSON Schemas
 ```
