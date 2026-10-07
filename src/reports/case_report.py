@@ -138,3 +138,72 @@ def write_vision_report(case, ctx: CaseContext, memory: InvestigationMemory, run
     w(f"- `workspace/memory.json` (context entities and {len(memory.links)} cumulative links)")
     out.write_text("\n".join(L) + "\n", encoding="utf-8")
     return out
+
+
+def write_agents_report(case, ctx: CaseContext, memory: InvestigationMemory, run_id: str, reports: list[dict],
+                        run_dir: Path, per_category: int = 25) -> Path:
+    """Report of a run of the deterministic agents (AppArtifactAgent, FileSystemAgent).
+
+    These agents emit thousands of rows; the report gives counts per category and evidence item and the
+    first ``per_category`` verified findings of each category with their citations. The complete set is
+    in the findings JSON files listed in the hand-off section.
+    """
+    out = case.dir / "workspace" / "reports" / f"{run_id}_agents.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    verified = [f for r in reports for f in r["verified_findings"]]
+    rejected = [f for r in reports for f in r["rejected_findings"]]
+    run_links = [l for l in memory.links if l["run_id"] == run_id]
+    agents = sorted({r["agent"] for r in reports})
+    L: list[str] = []
+    w = L.append
+    w(f"# {case.title}")
+    w(f"_{' + '.join(agents)} report, run `{run_id}`, generated "
+      f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}._\n")
+    w("> Every statement in sections 2-3 is **VERIFIED**: the deterministic verifier re-executed its citations "
+      "(read-only SQL by rowid, or bytes at an offset) against the evidence file and re-checked its SHA-256.\n")
+    w("## 1. Brief")
+    w(f"{case.summary}\n")
+    w("## 2. Coverage")
+    w("| Agent | Evidence | Artifacts | Verified | Rejected | Runtime | Errors |")
+    w("|---|---|---|---|---|---|---|")
+    for r in reports:
+        sc = r["status_counts"]
+        w(f"| {r['agent']} | `{r['evidence_id']}` | {r['artifacts_analyzed']} | {sc['verified']} | {sc['rejected']} | "
+          f"{r['runtime_s']} s | {len(r['errors'])} |")
+    cats = Counter(f["category"] for f in verified)
+    w("\n| Category | Verified findings |")
+    w("|---|---|")
+    for c, n in cats.most_common():
+        w(f"| {c} | {n} |")
+    w("")
+    w("## 3. Verified evidence (first findings per category)")
+    by_cat = defaultdict(list)
+    for f in verified:
+        by_cat[f["category"]].append(f)
+    for c, fs in sorted(by_cat.items()):
+        w(f"### {c} ({len(fs)})")
+        w("| ID | Evidence | Statement | Citation(s) |")
+        w("|---|---|---|---|")
+        for f in fs[:per_category]:
+            w(f"| `{f['finding_id']}` | `{f['evidence_id']}` | {_md(f['claim'])} | "
+              + "<br>".join(_cite(c) for c in f["citations"][:3]) + (" …" if len(f["citations"]) > 3 else "") + " |")
+        w("")
+    w("## 4. Contrast with the investigation context")
+    rel = Counter(l["relation"] for l in run_links)
+    w(", ".join(f"{k}: {v}" for k, v in rel.most_common()) or "_No context links._")
+    for l in [l for l in run_links if l["relation"] == "corroborates"][:40]:
+        w(f"- `{l['finding_id']}` `{l['evidence_id']}` · {_md(l['artifact'], 80)}: {_md(l['why'], 200)}")
+    w("")
+    w("## 5. Rejected claims")
+    if not rejected:
+        w("_None: every citation was reproduced from the evidence._\n")
+    for f in rejected[:30]:
+        reasons = "; ".join(_md(v.get("reason", ""), 90) for v in f["verification"] if not v.get("verified"))
+        w(f"- `{f['finding_id']}` {f['category']} {_md(f['claim'], 120)} — {reasons}")
+    w("")
+    w("## 6. Hand-off")
+    for r in reports:
+        stem = f"{r['agent'].lower()}__{r['evidence_id']}"
+        w(f"- `{(run_dir / f'{stem}_findings.json').relative_to(case.dir).as_posix()}` (+ `_verification_audit.json`)")
+    out.write_text("\n".join(L) + "\n", encoding="utf-8")
+    return out

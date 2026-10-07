@@ -190,6 +190,56 @@ def cmd_investigate(a: argparse.Namespace) -> int:
     return 0 if not res["totals"]["rejected"] else 2
 
 
+def cmd_agents(a: argparse.Namespace) -> int:
+    """apps / fs / investigate --agents apps,fs: deterministic agents over one case."""
+    from src.pipeline.investigate import investigate_agents
+
+    agents = a.agents.split(",") if getattr(a, "agents", "") else [a.cmd]
+    res = investigate_agents(a.case, agents, evidence=[x for x in a.items.split(",") if x] or None, limit=a.limit,
+                             carve=not getattr(a, "no_carve", False), run_id=a.run_id or None)
+    print(f"[{'+'.join(agents)}] run {res['run_id']} totals={res['totals']}")
+    print(f"[report] {res['report']}")
+    return 0 if not res["totals"]["rejected"] else 2
+
+
+def cmd_corpus(a: argparse.Namespace) -> int:
+    """Run the AppArtifactAgent + FileSystemAgent over every READY case; summary in data/outputs/corpus_runs/."""
+    from collections import Counter
+
+    from src.cases.builder import readiness
+    from src.cases.registry import CASES
+    from src.pipeline.investigate import investigate_agents
+
+    agents = a.agents.split(",")
+    ready = [c for c in CASES.values() if readiness(c)["ready"]]
+    if a.cases != "all":
+        ready = [c for c in ready if c.case_id in a.cases.split(",")]
+    out_dir = settings.OUTPUTS_DIR / "corpus_runs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows, cats, totals = [], Counter(), Counter()
+    for i, case in enumerate(ready, 1):
+        print(f"[corpus] {i}/{len(ready)} {case.case_id}", flush=True)
+        try:
+            res = investigate_agents(case.case_id, agents, limit=a.limit, carve=not a.no_carve)
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 - one case must not stop the corpus run
+            rows.append({"case_id": case.case_id, "error": f"{type(exc).__name__}: {exc}"})
+            print(f"  [error] {rows[-1]['error']}", flush=True)
+            continue
+        for r in res["reports"]:
+            cats.update(f["category"] for f in r["verified_findings"])
+        totals.update(res["totals"])
+        rows.append({"case_id": case.case_id, "run_id": res["run_id"], "totals": res["totals"], "report": res["report"],
+                     "per_evidence": [{"agent": r["agent"], "evidence_id": r["evidence_id"],
+                                       "artifacts": r["artifacts_analyzed"], **r["status_counts"],
+                                       "errors": len(r["errors"])} for r in res["reports"]]})
+    summary = {"agents": agents, "cases": len(ready), "totals": dict(totals), "categories": dict(cats.most_common()),
+               "runs": rows}
+    path = out_dir / f"corpus_{'-'.join(agents)}.json"
+    path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"[corpus] {len(ready)} cases totals={dict(totals)} -> {path}")
+    return 0 if not totals.get("rejected") else 2
+
+
 def cmd_dataset(a: argparse.Namespace) -> int:
     from src.datasets.export import export
 
@@ -263,7 +313,24 @@ def main(argv: list[str] | None = None) -> int:
     pi.add_argument("--no-vlm", action="store_true")
     pi.add_argument("--no-ocr", action="store_true")
     pi.add_argument("--run-id", default="")
-    pi.set_defaults(fn=cmd_investigate)
+    pi.add_argument("--agents", default="", help="apps,fs: run the deterministic agents instead of vision")
+    pi.add_argument("--no-carve", action="store_true")
+    pi.set_defaults(fn=lambda a: cmd_agents(a) if a.agents else cmd_investigate(a))
+    for name, helptext in (("apps", "AppArtifactAgent: SMS, calls, contacts, chats, browser history (verified rows)"),
+                           ("fs", "FileSystemAgent: signature mismatches, hidden/deleted files, SQLite carving")):
+        pa = sub.add_parser(name, help=helptext)
+        pa.add_argument("--case", required=True)
+        pa.add_argument("--items", default="", help="comma-separated evidence ids (default: all fetched)")
+        pa.add_argument("--limit", type=int, default=0, help="max artifacts per evidence item")
+        pa.add_argument("--run-id", default="")
+        pa.add_argument("--no-carve", action="store_true")
+        pa.set_defaults(fn=cmd_agents, agents="")
+    pco = sub.add_parser("corpus", help="run apps+fs over every READY case (summary in data/outputs/corpus_runs)")
+    pco.add_argument("--agents", default="apps,fs")
+    pco.add_argument("--cases", default="all")
+    pco.add_argument("--limit", type=int, default=0)
+    pco.add_argument("--no-carve", action="store_true")
+    pco.set_defaults(fn=cmd_corpus)
     sub.add_parser("dataset", help="export the case database as ML dataset tables (data/datasets/)").set_defaults(
         fn=cmd_dataset)
     pf = sub.add_parser("finetune", help="build FDX TrainingSample JSONL from a dataset export (or --validate a file)")

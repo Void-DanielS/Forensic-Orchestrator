@@ -70,6 +70,9 @@ python -m venv .venv
 .venv/Scripts/python main.py cases build --cases all --groups light      # documents + evidence (resumable)
 .venv/Scripts/python main.py cases build --cases narcos --groups heavy   # spooled images (large)
 .venv/Scripts/python main.py investigate --case m57_patents --limit 5    # vision agent over a whole case
+.venv/Scripts/python main.py apps --case hickman_android_10             # AppArtifactAgent: SMS, chats, calls, browsers
+.venv/Scripts/python main.py fs --case m57_patents                      # FileSystemAgent: signatures, hidden/deleted, SQLite carving
+.venv/Scripts/python main.py corpus                                     # apps + fs over every READY case
 .venv/Scripts/python main.py gui                                         # http://127.0.0.1:8765
 .venv/Scripts/python main.py dataset                                     # ML tables -> data/datasets/<date>/
 .venv/Scripts/python main.py finetune                                    # FDX training samples -> <date>/finetune/

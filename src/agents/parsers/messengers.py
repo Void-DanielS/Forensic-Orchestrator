@@ -1,0 +1,62 @@
+"""Third-party messengers present in the corpus: WhatsApp (Android old/new schema, iOS), Skype,
+Facebook Messenger, LINE, Kik, TikTok.
+
+Telegram, Signal and Snapchat store message bodies as serialized / encrypted BLOBs and are not
+parsed here (a BLOB cannot be quoted as a reproducible text snippet).
+"""
+from src.agents.parsers.base import Col, Lookup, TableSpec
+
+_FROM_ME = {0: "received from", 1: "sent to"}
+
+SPECS = [
+    TableSpec("whatsapp.message", r"(^|/)msgstore\.db$", ("messages",),
+              (Col("remote", ("key_remote_jid",)), Col("from_me", ("key_from_me",)), Col("text", ("data",)),
+               Col("caption", ("media_caption",)), Col("timestamp", ("timestamp",), "unix_ms")),
+              require=("remote", "timestamp"), text=("text", "caption"), labels={"from_me": _FROM_ME},
+              claim="WhatsApp {from_me_label} {remote} at {timestamp_utc}: {text}{caption}",
+              description="WhatsApp Android, legacy schema (msgstore.db, messages)"),
+    TableSpec("whatsapp.message", r"(^|/)msgstore\.db$", ("message",),
+              (Col("text", ("text_data",)), Col("from_me", ("from_me",)), Col("timestamp", ("timestamp",), "unix_ms"),
+               Col("chat_row_id", ("chat_row_id",), cite=False)),
+              require=("text", "timestamp", "chat_row_id"), text=("text",), labels={"from_me": _FROM_ME},
+              lookups=(Lookup("jid_row_id", ("chat",), ("_id",), ("jid_row_id",), "chat_row_id"),
+                       Lookup("remote", ("jid",), ("_id",), ("raw_string",), "jid_row_id")),
+              claim="WhatsApp {from_me_label} {remote} at {timestamp_utc}: {text}",
+              description="WhatsApp Android, 2022+ schema (msgstore.db, message + chat + jid)"),
+    TableSpec("whatsapp.message", r"(^|/)ChatStorage\.sqlite$", ("ZWAMESSAGE",),
+              (Col("text", ("ZTEXT",)), Col("date", ("ZMESSAGEDATE",), "cocoa_s"), Col("from_me", ("ZISFROMME",)),
+               Col("from_jid", ("ZFROMJID",)), Col("to_jid", ("ZTOJID",))),
+              require=("text", "date"), text=("text",), labels={"from_me": _FROM_ME},
+              claim="WhatsApp {from_jid} -> {to_jid} at {date_utc}: {text}",
+              description="WhatsApp iOS (ChatStorage.sqlite, ZWAMESSAGE)"),
+    TableSpec("skype.message", r"(^|/)main\.db$", ("Messages",),
+              (Col("author", ("author",)), Col("display_name", ("from_dispname",)), Col("body", ("body_xml",)),
+               Col("timestamp", ("timestamp",), "unix_s"), Col("convo_id", ("convo_id",), cite=False)),
+              require=("author", "body"), text=("body",),
+              claim="Skype message from {author} ({display_name}) at {timestamp_utc}: {body}",
+              description="Skype classic (main.db, Messages)"),
+    TableSpec("fbmessenger.message", r"(^|/)threads_db2$", ("messages",),
+              (Col("text", ("text",)), Col("sender", ("sender",)), Col("timestamp", ("timestamp_ms",), "unix_ms"),
+               Col("thread_key", ("thread_key",))),
+              require=("text", "timestamp"), text=("text",),
+              claim="Messenger message in {thread_key} at {timestamp_utc}: {text} (sender {sender})",
+              description="Facebook Messenger Android (threads_db2, messages)"),
+    TableSpec("line.message", r"(^|/)naver_line$", ("chat_history",),
+              (Col("chat_id", ("chat_id",)), Col("from_mid", ("from_mid",)), Col("content", ("content",)),
+               Col("created", ("created_time",), "unix_ms")),
+              require=("content", "created"), text=("content",),
+              claim="LINE message in {chat_id} from {from_mid} at {created_utc}: {content}",
+              description="LINE Android (naver_line, chat_history)"),
+    TableSpec("kik.message", r"(^|/)kikDatabase\.db$", ("messagesTable",),
+              (Col("body", ("body",)), Col("partner", ("partner_jid",)), Col("was_me", ("was_me",)),
+               Col("timestamp", ("timestamp",), "unix_ms")),
+              require=("body", "timestamp"), text=("body",), labels={"was_me": _FROM_ME},
+              claim="Kik {was_me_label} {partner} at {timestamp_utc}: {body}",
+              description="Kik Android (kikDatabase.db, messagesTable)"),
+    TableSpec("tiktok.message", r"(^|/)db_im_xx$|(^|/)\d+_im\.db$", ("msg",),
+              (Col("content", ("content",)), Col("sender", ("sender",)), Col("created", ("created_time",), "unix_auto"),
+               Col("conversation", ("conversation_id",))),
+              require=("content", "created"), text=("content",),
+              claim="TikTok message in {conversation} from {sender} at {created_utc}: {content}",
+              description="TikTok direct messages (db_im_xx, msg)"),
+]

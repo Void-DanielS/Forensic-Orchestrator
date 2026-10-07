@@ -238,6 +238,13 @@ Kinds: `run_start`, `index_built`, `evidence_start`, `artifact_start`, `exif`, `
 | `fs_metadata` | NTFS system files `$MFT`, `$LogFile`, `$Boot`, `$Secure`, `$AttrDef` |
 | `backup_meta` | iTunes backup metadata (`Manifest.db`, `Manifest.plist`, `Info.plist`, `Status.plist`) |
 | `shell_history` | `.bash_history` and similar |
+| `network_capture` | packet capture (`.pcap`, `.pcapng`, `.cap`) |
+| `memory_image` | physical memory dump (`.mem`, `.vmem`, `.lime`, `.dmp`, RAM `.raw`) |
+| `crash_dump` | small Windows minidump |
+| `video` / `audio` | media files (CCTV footage, voice notes) |
+| `artifact` | small file of no recognised type kept from a logical tree (≤ 32 MB) |
+| `disk_image_unparsed` | image segment kept byte-for-byte because no file system was recognised (wiped disks, NAND / chip-off dumps) |
+| `compressed_evidence` | the distribution archive itself, kept when its members are too large to store unpacked (sparse memory dumps, unallocated-space blobs) |
 
 ### 6.3 Epoch kind — `src/schemas/common.py:EpochKind`
 
@@ -255,7 +262,7 @@ Kinds: `run_start`, `index_built`, `evidence_start`, `artifact_start`, `exif`, `
 
 A zero numeric value means "unset" (`utc` stays `null`).
 
-### 6.4 Finding category (current)
+### 6.4 Finding category
 
 | Category | Agent | Evidentiary when |
 |---|---|---|
@@ -264,6 +271,20 @@ A zero numeric value means "unset" (`utc` stays `null`).
 | `exif.gps` | vision | verified (all GPS tags cited) |
 | `ocr.corroborated` | vision | verified (OCR text matched a DB cell / text line) |
 | `ocr.uncorroborated`, `vlm_text.uncorroborated`, `vlm.description` | vision | never (model observation) |
+
+| `sms.message` | apps | verified (Android `mmssms.db` sms, Google Messages `bugle_db`) |
+| `imessage.message`, `whatsapp.message`, `skype.message`, `fbmessenger.message`, `line.message`, `kik.message`, `tiktok.message` | apps | verified (each quoted cell re-queried by rowid) |
+| `call.log`, `contact.entry`, `contact.person`, `contact.value`, `calendar.event`, `account.entry` | apps | verified |
+| `chrome.url`, `chrome.search`, `chrome.download`, `firefox.url`, `safari.visit` | apps | verified |
+| `knowledgec.event`, `notes.note`, `photos.asset` | apps | verified |
+| `fs.magic_mismatch` | fs | verified (signature bytes re-read at the offset) |
+| `fs.sqlite_unlisted` | fs | verified (SQLite header bytes) |
+| `fs.orphan_wal` | fs | verified (WAL magic) |
+| `fs.hidden_path`, `fs.deleted_recovered` | fs | verified (first 16 bytes + hash: the file exists as described) |
+| `sqlite.carved_text` | fs | verified (exact bytes of the carved run in a free page / freeblock / unallocated cell area). Remnants of deleted rows: their *meaning* is an analyst's call |
+
+Apps findings carry `value = {table, rowid, fields, timestamps}`; every timestamp is a `ForensicTimestamp`.
+FS findings carry the manifest's `sha256`, `size`, `macb` and `original_path` in `value`.
 
 New agents add categories as `<domain>.<item>` (e.g. `sms.message`, `chrome.visit`, `fs.magic_mismatch`) and
 register them here.

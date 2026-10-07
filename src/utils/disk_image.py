@@ -290,6 +290,93 @@ def _iso(sec, nano=0) -> str | None:
         return None
 
 
+class _RegionFile(io.RawIOBase):
+    """File object over a byte region of a pytsk3 image (what libvslvm needs to open an LVM PV)."""
+
+    def __init__(self, img, offset: int, size: int):
+        super().__init__()
+        self.img, self.base, self.size, self.pos = img, offset, size, 0
+        self.lock = threading.Lock()
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def seek(self, off: int, whence: int = 0) -> int:
+        self.pos = off if whence == 0 else self.pos + off if whence == 1 else self.size + off
+        return self.pos
+
+    def tell(self) -> int:
+        return self.pos
+
+    def get_size(self) -> int:
+        return self.size
+
+    def read(self, n: int = -1) -> bytes:
+        n = self.size - self.pos if n is None or n < 0 else min(n, self.size - self.pos)
+        if n <= 0:
+            return b""
+        with self.lock:
+            data = self.img.read(self.base + self.pos, n)
+        self.pos += len(data)
+        return data
+
+
+def _lvm_filesystems(img, offset: int, size: int, keep: list) -> list[FileSystem]:
+    """Logical volumes of an LVM2 physical volume at ``offset`` (Ubuntu / RHEL servers default to LVM)."""
+    pytsk3 = _tsk()
+    try:
+        head = img.read(offset, 4096)
+    except OSError:
+        return []
+    if b"LABELONE" not in head[:2048]:
+        return []
+    try:
+        import pyvslvm
+    except ImportError:
+        return []
+    region = _RegionFile(img, offset, size)
+    handle = pyvslvm.handle()
+    handle.open_file_object(region)
+    pv = _RegionFile(img, offset, size)       # the PV data is read through its own file object
+    handle.open_physical_volume_files_as_file_objects([pv])
+    keep += [region, pv, handle]
+    found = []
+    vg = handle.get_volume_group()
+    for i in range(vg.get_number_of_logical_volumes()):
+        lv = vg.get_logical_volume(i)
+        lock = threading.Lock()
+
+        def reader(off: int, n: int, lv=lv, lock=lock) -> bytes:
+            with lock:
+                return lv.read_buffer_at_offset(n, off)
+
+        lv_img = make_tsk_image(reader, lv.get_size())
+        keep += [lv, lv_img]
+        try:
+            fs = pytsk3.FS_Info(lv_img, offset=0)
+        except OSError:
+            continue
+        found.append(FileSystem("", 0, _fstype(fs), f"LVM {vg.get_name()}/{lv.get_name()}", fs))
+    return found
+
+
+_KEEP_ALIVE: list = []   # LVM handles / images must outlive the FS_Info objects built on them
+
+
+def _dissect(img, offset: int, size: int, desc: str) -> list[FileSystem]:
+    """XFS / APFS (not in this TSK build) through dissect; [] when neither is present or the parse fails."""
+    from src.utils.dissect_fs import dissect_filesystems
+    try:
+        return [FileSystem("", offset, t, f"{desc}: {d}", h)
+                for t, d, h in dissect_filesystems(img.read, offset, size, _KEEP_ALIVE)]
+    except Exception as exc:  # noqa: BLE001 - an unsupported variant must not stop the other partitions
+        print(f"    [dissect] {desc}: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
+        return []
+
+
 def find_filesystems(img) -> list[FileSystem]:
     pytsk3 = _tsk()
     found: list[FileSystem] = []
@@ -303,6 +390,7 @@ def find_filesystems(img) -> list[FileSystem]:
             try:
                 fs = pytsk3.FS_Info(img, offset=part.start * block)
             except OSError:
+                found += _lvm_filesystems(img, part.start * block, part.len * block, _KEEP_ALIVE) or                     _dissect(img, part.start * block, part.len * block, desc)
                 continue
             found.append(FileSystem("", part.start * block, _fstype(fs), desc, fs))
     except OSError:
@@ -312,7 +400,7 @@ def find_filesystems(img) -> list[FileSystem]:
             fs = pytsk3.FS_Info(img, offset=0)
             found.append(FileSystem("", 0, _fstype(fs), "whole image", fs))
         except OSError:
-            pass
+            found += _lvm_filesystems(img, 0, img.get_size(), _KEEP_ALIVE) or _dissect(img, 0, img.get_size(), "whole image")
     for i, fs in enumerate(found):
         fs.label = "" if len(found) == 1 else _volume_label(fs, i)
     return found
@@ -342,6 +430,9 @@ PRUNE_DIRS = re.compile(r"^/(windows/(winsxs|installer|assembly|servicing|softwa
 
 
 def walk(fs: FileSystem, max_depth: int = 64) -> Iterator[FsEntry]:
+    if hasattr(fs.handle, "walk"):           # dissect adapter (XFS / APFS)
+        yield from fs.handle.walk(fs.label, PRUNE_DIRS, max_depth)
+        return
     pytsk3 = _tsk()
     root = fs.handle.open_dir(path="/")
     stack = [(root, "", 0)]
@@ -404,6 +495,20 @@ COMPUTER_PRIORITY = {"fs_metadata": 0, "registry": 0, "event_log": 0, "prefetch"
                      "browser_history": 0, "email": 1, "shortcut": 1, "recycle_bin": 1, "system_log": 1,
                      "shell_history": 0, "thumbnail_cache": 2, "user_document": 2, "screenshot": 2,
                      "user_image": 3, "app_image": 4, "removable_file": 2, "app_config": 3}
+
+
+def auto_platform(fstype: str) -> str:
+    """Selector set for a file system whose owner platform is not declared (mixed bundles)."""
+    t = fstype.lower()
+    if t.startswith("ntfs"):
+        return "windows"
+    if t.startswith(("ext", "yaffs", "f2fs", "btrfs", "xfs")):
+        return "linux"
+    if t.startswith(("hfs", "apfs")):
+        return "macos"
+    if t.startswith(("fat", "exfat", "iso9660", "udf")):
+        return "removable"
+    return "generic"
 
 
 def classify_computer(path: str, platform: str, size: int) -> str | None:
@@ -483,6 +588,46 @@ def classify_computer(path: str, platform: str, size: int) -> str | None:
             if ext in DOC_EXTS_C + (".py", ".sh", ".js", ".conf", ".cfg", ".ini", ".yaml", ".yml", ".gcode"):
                 return "user_document" if size <= 32 << 20 else None
         return None
+    if platform == "macos":
+        if l.startswith("/private/var/log/") or l.startswith("/library/logs/") or "/library/logs/" in l and in_user:
+            return "system_log" if size <= 64 << 20 else None
+        if name in (".bash_history", ".zsh_history", ".sh_history") or "/.bash_sessions/" in l:
+            return "shell_history"
+        if in_user:
+            if ext == ".plist" and ("/library/preferences/" in l or "/library/application support/" in l) \
+                    and size <= 4 << 20:
+                return "app_config"
+            if ext in (".emlx", ".mbox", ".eml") or "/library/mail/" in l and ext == "":
+                return "email" if size <= 64 << 20 else None
+            if ext in IMG_EXTS_C:
+                return "screenshot" if "screen shot" in l or "screenshot" in l else (
+                    "app_image" if "/library/" in l else "user_image")
+            if "/library/" in l:
+                return None
+            if ext in DOC_EXTS_C:
+                return "user_document"
+        if re.match(r"^/(library|private/var)/db/", l) and (ext in (".db", ".plist") or name.endswith(".store.db")):
+            return "app_database" if size <= 64 << 20 else None
+        return None
+
+    if platform in ("android", "ios"):
+        # A phone partition (chip-off / JTAG / userdata image) opened by The Sleuth Kit: reuse the mobile
+        # selectors. The userdata partition is mounted at /data, so its root has no "data/" prefix.
+        from src.utils.dataset_scraper import classify as classify_mobile
+        return classify_mobile(path, platform) or classify_mobile("/data" + path, platform)
+
+    if platform in ("iot", "generic"):
+        if ext in (".db", ".sqlite", ".sqlite3") or name.endswith(("-wal", "-journal")):
+            return "app_database"
+        if l.startswith("/var/log/") or ext == ".log" or "/log/" in l:
+            return "system_log" if size <= 64 << 20 else None
+        if ext in IMG_EXTS_C:
+            return "user_image"
+        if ext in (".json", ".xml", ".conf", ".cfg", ".ini", ".plist", ".yaml", ".yml") and size <= 4 << 20:
+            return "app_config"
+        if ext in DOC_EXTS_C + (".mp4", ".avi", ".h264", ".264", ".dav", ".mov") and size <= 256 << 20:
+            return "user_document"
+        return None
     raise ValueError(platform)
 
 
@@ -496,12 +641,17 @@ DELETED_CATEGORIES = {"user_document", "user_image", "screenshot", "email", "app
 
 
 class DiskFetcher:
-    def __init__(self, ev: DiskEvidence, out: Path):
+    """Extract one disk image. ``sources`` (already-open byte sources) and ``prefix`` let a bundle
+    (:mod:`src.utils.bundle`) run several images into one evidence directory: files go to
+    ``fs/<prefix>/`` and every FILELIST row carries ``image=<prefix>``."""
+
+    def __init__(self, ev: DiskEvidence, out: Path, prefix: str = "", sources: list | None = None):
         from src.utils import dataset_scraper as ds
 
         self.ds, self.ev, self.out = ds, ev, out
+        self.prefix, self.sources = prefix, sources
         self.ctx = out / "_case_context"
-        self.dest = ds._DestMap(out / "fs")
+        self.dest = ds._DestMap(out / "fs" / prefix if prefix else out / "fs")
         self.records: list[dict] = []
         self.notes: list[str] = []
         self.skipped: collections.Counter = collections.Counter()
@@ -513,7 +663,9 @@ class DiskFetcher:
         if self.ev.urls:
             for doc in self.ev.acquisition_docs:
                 self._fetch_doc_url(doc)
-            remote = [ds.HttpSource(self.ev.full(u)) for u in self.ev.urls]
+            from src.utils.remote import open_source
+
+            remote = [open_source(self.ev.full(u), ds.SPOOL_DIR, self.ev.evidence_id) for u in self.ev.urls]
             total = sum(s.size for s in remote)
             srcs = [self._local(s, u.rsplit("/", 1)[-1].replace("%23", "#"), total) for s, u in zip(remote, self.ev.urls)]
             print(f"  [image] {len(srcs)} segment(s), {total / 1e9:.2f} GB, "
@@ -595,38 +747,47 @@ class DiskFetcher:
             print(f"  [context] {dest.name}")
 
     # ---------------------------------------------------------------- main
+    def extract(self, listing) -> tuple[dict, list[dict]]:
+        """Open the image, list every FS entry into ``listing`` and extract the selection."""
+        image = open_image(self.sources or self.resolve_segments(), self.ev.fmt)
+        print(f"  [image] media {image.media_size / 1e9:.2f} GB; acquisition hash: "
+              f"{image.info.get('stored_hashes') or '-'}", flush=True)
+        filesystems = find_filesystems(image.tsk)
+        if not filesystems:
+            raise RuntimeError("no file system recognised by The Sleuth Kit")
+        fs_meta, candidates = [], []
+        for fs in filesystems:
+            plat = self.ev.platform if self.ev.platform != "auto" else auto_platform(fs.fstype)
+            stats: collections.Counter = collections.Counter()
+            print(f"  [fs] {fs.label or '/'} {fs.fstype} @ {fs.offset} ({fs.partition})", flush=True)
+            for e in walk(fs):
+                row = asdict(e)
+                if self.prefix:
+                    row["image"] = self.prefix
+                listing.write(json.dumps(row, ensure_ascii=False) + "\n")
+                stats["dirs" if e.is_dir else "files"] += 1
+                stats["deleted"] += not e.allocated
+                if not e.is_dir and e.size > 0:
+                    cat = classify_computer(e.path, plat, e.size)
+                    if cat:
+                        candidates.append((fs, e, cat))
+                n = stats["files"] + stats["dirs"]
+                if n % 25000 == 0:
+                    print(f"    walked {n} entries, {image.fetched() / 1e6:.0f} MB read", flush=True)
+            fs_meta.append({"label": fs.label, "fstype": fs.fstype, "offset": fs.offset, "partition": fs.partition,
+                            "platform": plat,
+                            **({"image": self.prefix} if self.prefix else {}), **stats})
+            print(f"    {dict(stats)}", flush=True)
+        self._extract(candidates, image)
+        return {**image.info, "bytes_read": image.fetched()}, fs_meta
+
     def run(self) -> dict:
         started = time.time()
         self.out.mkdir(parents=True, exist_ok=True)
         print(f"[fetch] {self.ev.evidence_id}: {self.ev.title}", flush=True)
         try:
-            image = open_image(self.resolve_segments(), self.ev.fmt)
-            print(f"  [image] media {image.media_size / 1e9:.2f} GB; acquisition hash: "
-                  f"{image.info.get('stored_hashes') or '-'}", flush=True)
-            filesystems = find_filesystems(image.tsk)
-            if not filesystems:
-                raise RuntimeError("no file system recognised by The Sleuth Kit")
-            fs_meta, candidates = [], []
             with gzip.open(self.out / "FILELIST.jsonl.gz", "wt", encoding="utf-8") as listing:
-                for fs in filesystems:
-                    stats: collections.Counter = collections.Counter()
-                    print(f"  [fs] {fs.label or '/'} {fs.fstype} @ {fs.offset} ({fs.partition})", flush=True)
-                    for e in walk(fs):
-                        listing.write(json.dumps(asdict(e), ensure_ascii=False) + "\n")
-                        stats["dirs" if e.is_dir else "files"] += 1
-                        stats["deleted"] += not e.allocated
-                        if not e.is_dir and e.size > 0:
-                            cat = classify_computer(e.path, self.ev.platform, e.size)
-                            if cat:
-                                candidates.append((fs, e, cat))
-                        n = stats["files"] + stats["dirs"]
-                        if n % 25000 == 0:
-                            print(f"    walked {n} entries, {image.fetched() / 1e6:.0f} MB read", flush=True)
-                    fs_meta.append({"label": fs.label, "fstype": fs.fstype, "offset": fs.offset,
-                                    "partition": fs.partition, **stats})
-                    print(f"    {dict(stats)}", flush=True)
-            self._extract(candidates, image)
-            image_info = {**image.info, "bytes_read": image.fetched()}
+                image_info, fs_meta = self.extract(listing)
             ok = True
         finally:
             # Keep the spool after a failure so a retry resumes without re-downloading.
@@ -689,7 +850,7 @@ class DiskFetcher:
                       f"{time.time() - t0:.0f}s", flush=True)
 
     def _write(self, fs: FileSystem, e: FsEntry, cat: str, is_deleted: bool) -> None:
-        member = f"{fs.label or 'fs'}:{e.path}"
+        member = f"{self.prefix + '!' if self.prefix else ''}{fs.label or 'fs'}:{e.path}"
         if is_deleted:
             # Flat <inode>_<name>: deleted names collide with each other and with deleted directories.
             rel = "/".join(p for p in ("_deleted", fs.label, f"{e.inode}_{e.path.rsplit('/', 1)[-1]}") if p)
@@ -746,6 +907,11 @@ def parallel_download(src, path: Path, label: str = "", chunk: int = 32 << 20, t
     """Download a range source to ``path`` with parallel range requests; resumable via ``<path>.todo``."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    url = getattr(src, "url", "") or ""
+    if "archive.org" in url:
+        threads = 3      # archive.org throttles many parallel ranges per IP to a crawl (chunk size kept: .todo resume)
+    elif "drive.usercontent.google.com" in url:
+        threads = min(threads, 8)
     todo_p = path.with_name(path.name + ".todo")
     n = (src.size + chunk - 1) // chunk
     todo = set(json.loads(todo_p.read_text())) if todo_p.exists() and path.exists() else set(range(n))

@@ -37,7 +37,8 @@ class Tracer:
     def _write_meta(self) -> None:
         tmp = self.dir / "run.json.tmp"
         tmp.write_text(json.dumps(self.meta, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-        tmp.replace(self.dir / "run.json")
+        from src.utils.fsio import atomic_replace
+        atomic_replace(tmp, self.dir / "run.json")
 
     def emit(self, kind: str, **data: Any) -> None:
         with self._lock:

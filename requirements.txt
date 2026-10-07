@@ -31,6 +31,12 @@ pypdf==6.19.0
 pytsk3==20260715
 libewf-python==20260924
 
+# Evidence containers beyond TSK: LVM2 volumes, XFS / APFS file systems (src/utils/dissect_fs.py)
+libvslvm-python==20260901
+dissect.xfs==3.13
+dissect.apfs==1.1
+# 7-Zip 24.09 is bundled in tools/7zip (7z, rar, split zip, Deflate64, vmdk/vhd)
+
 # Tests
 pytest==9.1.1
 

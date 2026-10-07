@@ -226,6 +226,8 @@ class MultimodalVisionAgent(BaseAgent):
             score, cell = hit
             if cell.kind == "line":
                 cite = self.cite(cell.db, "line_number", cell.value, line_number=cell.rowid)
+            elif cell.kind == "regex":
+                cite = self.cite(cell.db, "regex", cell.value, regex=cell.citation_regex())
             else:
                 cite = self.cite(cell.db, "sql_query", cell.value, sql_query=cell.citation_sql(), sql_params=[cell.rowid])
             return self.finding(

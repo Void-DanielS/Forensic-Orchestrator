@@ -23,9 +23,11 @@ from urllib.parse import quote, unquote
 import requests
 
 from src.cases.docs import ensure_text
-from src.cases.registry import CASES, CASES_DIR, Case, Doc
+from src.cases.registry import CASES, CASES_DIR, Case, Doc, evidence_meta
 from src.config.settings import RAW_IMAGES_DIR
 from src.utils import dataset_scraper as ds
+from src.utils import remote
+from src.utils.bundle import RemoteEvidence, fetch_bundle
 from src.utils.disk_image import DiskEvidence, fetch_disk
 
 ROLES = ("brief", "answer_key", "acquisition")
@@ -70,11 +72,31 @@ def _adopt_source_context(case: Case, ev_dir: Path) -> None:
 # Documents
 # --------------------------------------------------------------------------------------
 def _full(url: str) -> str:
-    return url if url.startswith("http") else f"{ds.DC}/{quote(url)}"
+    return url if url.startswith(("http", "ia:")) else f"{ds.DC}/{quote(url)}"
+
+
+def write_publisher_notes(case: Case) -> None:
+    """The publisher's own description of the case is part of what an examiner is told."""
+    if not case.publisher_notes and not case.answer_notes:
+        return
+    source = f"Source: {case.origin}" + (f" ({case.source_url})" if case.source_url else "")
+    if case.publisher_notes:
+        d = case.dir / "context" / "brief"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "publisher_description.md").write_text(
+            f"# {case.title}\n\n{source}\n\nPublisher's description of the case (verbatim or lightly abridged):\n\n"
+            f"{case.publisher_notes.strip()}\n", encoding="utf-8")
+    if case.answer_notes:
+        a = case.dir / "context" / "answer_key"
+        a.mkdir(parents=True, exist_ok=True)
+        (a / "publisher_solution_notes.md").write_text(
+            f"# {case.title}: publisher's full story / solution notes\n\n{source}\n\n{case.answer_notes.strip()}\n",
+            encoding="utf-8")
 
 
 def fetch_docs(case: Case) -> list[str]:
     notes = []
+    write_publisher_notes(case)
     for doc in case.docs:
         dest_dir = case.dir / "context" / doc.role
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -85,7 +107,10 @@ def fetch_docs(case: Case) -> list[str]:
                 name = doc.rename or unquote(_full(doc.url).rsplit("/", 1)[-1])
                 dest = dest_dir / ds._safe_part(name)
                 if not dest.exists():
-                    ds._http_download(_full(doc.url), dest)
+                    if doc.url.startswith("http") and not remote.gdrive_id(doc.url) and "web.archive.org" not in doc.url:
+                        ds._http_download(_full(doc.url), dest)
+                    else:
+                        remote.stream_download(_full(doc.url), dest)
                     print(f"  [doc:{doc.role}] {dest.name}")
         except RuntimeError as exc:
             if "encrypted" not in str(exc):
@@ -110,7 +135,7 @@ def fetch_docs(case: Case) -> list[str]:
 
 
 def _fetch_zip_docs(doc: Doc, dest_dir: Path) -> None:
-    src = ds.HttpSource(_full(doc.url))
+    src = remote.RemoteSource(_full(doc.url))
     if src.size < 300 << 20:
         # Small archives are downloaded whole; some use ZIP features that member range-reads mis-handle.
         zf = zipfile.ZipFile(io.BytesIO(src.get(0, src.size)))
@@ -137,25 +162,17 @@ def _fetch_zip_docs(doc: Doc, dest_dir: Path) -> None:
 def evidence_status(case: Case) -> list[dict]:
     rows = []
     for e in case.evidence:
-        eid = e if isinstance(e, str) else e.evidence_id
-        d = case.dir / "evidence" / eid
-        row = {"evidence_id": eid, "kind": "mobile" if isinstance(e, str) else "disk_image",
-               "fetched": (d / "MANIFEST.json").exists(), "inspected": (d / "INSPECTION.json").exists()}
-        if isinstance(e, str):
-            s = ds.SOURCES[e]
-            row.update(title=s.title, platform=s.platform, group=s.group, transfer_gb=s.transfer_gb)
-        else:
-            row.update(title=e.title, platform=e.platform, group=e.group, transfer_gb=e.transfer_gb,
-                       device=e.device, note=e.note)
-        rows.append(row)
+        meta = evidence_meta(e)
+        d = case.dir / "evidence" / meta["evidence_id"]
+        rows.append({**meta, "fetched": (d / "MANIFEST.json").exists(), "inspected": (d / "INSPECTION.json").exists()})
     return rows
 
 
 def fetch_evidence(case: Case, groups: set[str], only: set[str] | None = None) -> list[str]:
     failures = []
     for e in case.evidence:
-        eid = e if isinstance(e, str) else e.evidence_id
-        group = ds.SOURCES[e].group if isinstance(e, str) else e.group
+        meta = evidence_meta(e)
+        eid, group = meta["evidence_id"], meta["group"]
         if (only and eid not in only) or (group not in groups and not only):
             continue
         out = case.dir / "evidence" / eid
@@ -163,14 +180,32 @@ def fetch_evidence(case: Case, groups: set[str], only: set[str] | None = None) -
             if not (out / "MANIFEST.json").exists():
                 if isinstance(e, DiskEvidence):
                     fetch_disk(e, out)
+                elif isinstance(e, RemoteEvidence):
+                    fetch_bundle(e, out)
                 else:
                     ds.fetch_source(ds.SOURCES[e])
-            if isinstance(e, DiskEvidence) and (out / "_case_context").is_dir():
-                for f in (out / "_case_context").iterdir():
+            ctx = out / "_case_context"
+            if isinstance(e, DiskEvidence) and ctx.is_dir():
+                for f in ctx.iterdir():
                     dest = case.dir / "context" / "acquisition" / f"{eid}__{f.name}"
                     if not dest.exists():
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(f, dest)
+            if isinstance(e, RemoteEvidence) and ctx.is_dir():
+                # Documents shipped with the evidence keep the role the bundle assigned (brief / answer_key).
+                for role_dir in ctx.iterdir():
+                    if role_dir.is_dir() and role_dir.name in ROLES:
+                        for f in role_dir.iterdir():
+                            dest = case.dir / "context" / role_dir.name / f.name
+                            if not dest.exists():
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(f, dest)
+                for role in ROLES:
+                    d = case.dir / "context" / role
+                    if d.is_dir():
+                        for f in sorted(d.iterdir()):
+                            if not f.name.endswith(".txt") or not f.with_name(f.name[:-4]).exists():
+                                ensure_text(f)
             if not (out / "INSPECTION.json").exists():
                 rep = ds.inspect_path(out, eid)
                 print("[inspect]\n" + rep.summary(), flush=True)
@@ -181,16 +216,55 @@ def fetch_evidence(case: Case, groups: set[str], only: set[str] | None = None) -
     return failures
 
 
+def _brief_chars(case: Case) -> int:
+    d = case.dir / "context" / "brief"
+    if not d.is_dir():
+        return 0
+    n = 0
+    for f in d.iterdir():
+        # Text is either the file itself (.txt/.md) or the extracted <doc>.txt beside a PDF/DOCX/HTML.
+        if f.suffix.lower() in (".txt", ".md"):
+            n += len(f.read_text(encoding="utf-8", errors="replace"))
+    return n
+
+
+def readiness(case: Case, evidence: list[dict] | None = None) -> dict:
+    """Is the case usable for an investigation run: evidence on disk plus context to read?
+
+    context_level: rich (>= 1500 characters of brief text, or >= 3 questions with a brief),
+    basic (>= 300 characters), minimal (less). A case is *ready* with at least one fetched
+    evidence item that extracted files and at least a basic brief."""
+    evidence = evidence if evidence is not None else evidence_status(case)
+    files = 0
+    for e in evidence:
+        man = case.dir / "evidence" / e["evidence_id"] / "MANIFEST.json"
+        if man.exists():
+            try:
+                files += len(json.loads(man.read_text(encoding="utf-8")).get("files", []))
+            except (OSError, ValueError):
+                pass
+    chars = _brief_chars(case)
+    level = "rich" if chars >= 1500 or (len(case.questions) >= 3 and chars >= 300) else \
+        "basic" if chars >= 300 else "minimal"
+    ak = case.dir / "context" / "answer_key"
+    fetched = sum(1 for e in evidence if e["fetched"])
+    return {"evidence_fetched": fetched, "evidence_total": len(evidence), "extracted_files": files,
+            "brief_chars": chars, "questions": len(case.questions), "context_level": level,
+            "has_answer_key": ak.is_dir() and any(ak.iterdir()),
+            "ready": fetched > 0 and files > 0 and level != "minimal"}
+
+
 def write_case_json(case: Case) -> dict:
     docs = {}
     for role in ROLES:
         d = case.dir / "context" / role
         docs[role] = sorted(f.name for f in d.iterdir() if not f.name.endswith(".txt") or
                             not f.with_name(f.name[:-4]).exists()) if d.is_dir() else []
+    evidence = evidence_status(case)
     data = {"case_id": case.case_id, "title": case.title, "year": case.year, "kind": case.kind,
             "summary": case.summary, "origin": case.origin, "tags": list(case.tags), "questions": list(case.questions),
-            "evidence": evidence_status(case), "context_docs": docs,
-            "updated_utc": datetime.now(timezone.utc).isoformat()}
+            "source_url": case.source_url, "evidence": evidence, "context_docs": docs,
+            "readiness": readiness(case, evidence), "updated_utc": datetime.now(timezone.utc).isoformat()}
     case.dir.mkdir(parents=True, exist_ok=True)
     (case.dir / "case.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return data
@@ -219,7 +293,8 @@ def build(case_ids: list[str], groups: set[str], only: set[str] | None = None, d
 # --------------------------------------------------------------------------------------
 SCHEMA = """
 CREATE TABLE cases(case_id TEXT PRIMARY KEY, title TEXT, year INT, kind TEXT, summary TEXT, origin TEXT,
-                   tags TEXT, evidence_items INT, evidence_fetched INT, brief_docs INT, answer_key_docs INT);
+                   tags TEXT, evidence_items INT, evidence_fetched INT, brief_docs INT, answer_key_docs INT,
+                   questions INT, brief_chars INT, context_level TEXT, ready INT, source_url TEXT);
 CREATE TABLE evidence(evidence_id TEXT PRIMARY KEY, case_id TEXT REFERENCES cases, title TEXT, platform TEXT,
                       kind TEXT, fetched INT, files INT, bytes INT, sqlite_ok INT, images INT, images_gps INT,
                       deleted_recovered INT, fs_entries INT, acquisition_md5 TEXT, sandbox TEXT);
@@ -241,13 +316,12 @@ def build_catalog(path: Path | None = None) -> Path:
     for case in CASES.values():
         fetched = 0
         for e in case.evidence:
-            eid = e if isinstance(e, str) else e.evidence_id
+            meta = evidence_meta(e)
+            eid = meta["evidence_id"]
             d = case.dir / "evidence" / eid
             man_p, ins_p = d / "MANIFEST.json", d / "INSPECTION.json"
-            title = ds.SOURCES[e].title if isinstance(e, str) else e.title
-            platform = ds.SOURCES[e].platform if isinstance(e, str) else e.platform
-            row = dict(evidence_id=eid, case_id=case.case_id, title=title, platform=platform,
-                       kind="mobile" if isinstance(e, str) else "disk_image", fetched=man_p.exists(), files=0, bytes=0,
+            row = dict(evidence_id=eid, case_id=case.case_id, title=meta["title"], platform=meta["platform"],
+                       kind=meta["kind"], fetched=man_p.exists(), files=0, bytes=0,
                        sqlite_ok=0, images=0, images_gps=0, deleted_recovered=0, fs_entries=0, acquisition_md5=None,
                        sandbox=(d / "fs").relative_to(CASES_DIR.parent.parent).as_posix())
             if man_p.exists():
@@ -256,7 +330,8 @@ def build_catalog(path: Path | None = None) -> Path:
                 files = man["files"]
                 row.update(files=len(files), bytes=sum(f["size"] for f in files),
                            deleted_recovered=sum(1 for f in files if f.get("deleted")),
-                           acquisition_md5=(man.get("image") or {}).get("stored_hashes", {}).get("MD5"),
+                           acquisition_md5=((man.get("image") or (man.get("images") or [{}])[0])
+                                            .get("stored_hashes") or {}).get("MD5"),
                            fs_entries=sum(fs.get("files", 0) + fs.get("dirs", 0) for fs in man.get("filesystems", [])))
                 con.executemany("INSERT INTO files VALUES (?,?,?,?,?,?,?,?,?,?)", [
                     (case.case_id, eid, f["path"], f["category"], f["size"], f["sha256"], f.get("member_mtime"),
@@ -274,9 +349,11 @@ def build_catalog(path: Path | None = None) -> Path:
                 con.execute("INSERT INTO docs VALUES (?,?,?,?,?)", (case.case_id, role, t.name[:-4] if
                             t.with_name(t.name[:-4]).exists() else t.name, len(t.read_text(encoding="utf-8",
                             errors="replace")), t.relative_to(CASES_DIR).as_posix()))
-        con.execute("INSERT INTO cases VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        rd = readiness(case)
+        con.execute("INSERT INTO cases VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (case.case_id, case.title, case.year, case.kind, case.summary, case.origin, ",".join(case.tags),
-                     len(case.evidence), fetched, n_docs["brief"], n_docs["answer_key"]))
+                     len(case.evidence), fetched, n_docs["brief"], n_docs["answer_key"], rd["questions"],
+                     rd["brief_chars"], rd["context_level"], int(rd["ready"]), case.source_url))
     con.commit()
     con.close()
     tmp.replace(path)
@@ -287,7 +364,9 @@ def print_cases() -> None:
     for case in CASES.values():
         st = evidence_status(case)
         have = sum(r["fetched"] for r in st)
-        print(f"{case.case_id:24} {case.kind:16} {have}/{len(st)} evidence  {case.title}")
+        rd = readiness(case, st)
+        print(f"{case.case_id:28} {case.kind:16} {have}/{len(st)} evidence  ctx={rd['context_level']:7} "
+              f"{'READY' if rd['ready'] else '-----'}  {case.title}")
         for r in st:
             print(f"    {'[x]' if r['fetched'] else '[ ]'} {r['evidence_id']:22} {r['platform']:9} {r['group']:8} "
                   f"~{r['transfer_gb']:5.1f} GB  {r['title']}")

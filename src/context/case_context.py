@@ -324,4 +324,5 @@ class InvestigationMemory:
                     "summary": self.summary(), "runs": self.runs, "links": self.links}
             tmp = self.path.with_name(self.path.name + ".tmp")
             tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
-            tmp.replace(self.path)
+            from src.utils.fsio import atomic_replace
+            atomic_replace(tmp, self.path)

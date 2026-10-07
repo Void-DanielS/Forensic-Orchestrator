@@ -94,3 +94,59 @@ def investigate(case_id: str, evidence: list[str] | None = None, limit: int = 0,
     finally:
         if agent is not None:
             agent.release()
+
+
+AGENT_RUNNERS = {
+    "apps": ("AppArtifactAgent", "src.agents.app_artifact_agent"),
+    "fs": ("FileSystemAgent", "src.agents.filesystem_agent"),
+}
+
+
+def investigate_agents(case_id: str, agents: list[str], evidence: list[str] | None = None, limit: int = 0,
+                       carve: bool = True, run_id: str | None = None, quiet: bool = False) -> dict:
+    """Run the deterministic agents (``apps``, ``fs``) over a case: findings JSON per agent and evidence item,
+    a shared trace (live in the GUI), context links in the investigation memory and one Markdown report."""
+    import importlib
+
+    from src.reports.case_report import write_agents_report
+
+    case = CASES[case_id]
+    items = evidence or fetched_evidence(case)
+    if not items:
+        raise SystemExit(f"case {case_id} has no fetched evidence; run: python main.py cases build --cases {case_id}")
+    run_id = run_id or new_run_id("-".join(agents))
+    run_dir = case.dir / "workspace" / "runs" / run_id
+    tracer = Tracer(run_dir, {"run_id": run_id, "case_id": case_id, "agents": agents, "evidence": items,
+                              "limit": limit, "carve": carve})
+    ctx = CaseContext.load(case.dir, case.summary)
+    memory = InvestigationMemory(case.dir, ctx)
+    tracer.emit("run_start", case_id=case_id, title=case.title, evidence=items, agents=agents)
+    reports, totals, t0 = [], {"verified": 0, "rejected": 0, "uncorroborated": 0}, time.perf_counter()
+    try:
+        for eid in items:
+            for key in agents:
+                cls_name, module = AGENT_RUNNERS[key]
+                runner = importlib.import_module(module).run_on_evidence
+                kw = {"carve": carve} if key == "fs" else {}
+                rep = runner(case, eid, tracer=tracer, context=ctx, memory=memory, run_id=run_id, output_dir=run_dir,
+                             limit=limit, **kw)
+                if rep is None:
+                    tracer.emit("evidence_skipped", evidence_id=eid, agent=cls_name, reason="nothing to analyse")
+                    continue
+                d = rep.to_dict()
+                for k in totals:
+                    totals[k] += d["status_counts"][k]
+                reports.append(d)
+                memory.add_run({"run_id": run_id, "evidence_id": eid, "agent": rep.agent,
+                                "artifacts": rep.artifacts_analyzed, "status_counts": d["status_counts"]})
+                memory.save()
+                if not quiet:
+                    print(f"  [{cls_name}] {eid}: {d['status_counts']} in {d['runtime_s']} s", flush=True)
+        report_path = write_agents_report(case, ctx, memory, run_id, reports, run_dir)
+        tracer.finish("done", totals=totals, report=str(report_path.relative_to(case.dir)),
+                      seconds=round(time.perf_counter() - t0, 1))
+        return {"run_id": run_id, "totals": totals, "report": str(report_path), "reports": reports}
+    except BaseException as exc:
+        tracer.emit("error", error=f"{type(exc).__name__}: {exc}")
+        tracer.finish("failed", error=f"{type(exc).__name__}: {exc}")
+        raise

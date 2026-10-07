@@ -163,6 +163,7 @@ class BaseAgent(ABC):
                          artifacts=len(artifacts))
         self.prepare(artifacts)
         findings: list[Finding] = []
+        last_save = time.perf_counter()
         for i, rel in enumerate(artifacts, 1):
             t0 = time.perf_counter()
             self.tracer.emit("artifact_start", artifact=rel, index=i, total=len(artifacts))
@@ -176,9 +177,11 @@ class BaseAgent(ABC):
             findings += batch
             counts = {s.value: sum(1 for f in batch if f.status == s) for s in FindingStatus if s != FindingStatus.PENDING}
             self.tracer.emit("artifact_end", artifact=rel, seconds=round(time.perf_counter() - t0, 2), counts=counts)
-            if self.memory is not None:
+            if self.memory is not None and (i == len(artifacts) or time.perf_counter() - last_save > 5):
+                # throttled: agents over thousands of files must not rewrite memory.json per file
                 self.memory.save()
                 self.tracer.emit("memory", **self.memory.summary())
+                last_save = time.perf_counter()
         report = AgentReport(self.name, self.device, len(artifacts), findings, time.perf_counter() - start,
                              resources=self.gpu_stats(), errors=list(self.errors), evidence_id=self.evidence_id,
                              run_id=self.run_id)

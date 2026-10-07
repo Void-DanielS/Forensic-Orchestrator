@@ -63,6 +63,15 @@ class FileCategory(str, Enum):
     FS_METADATA = "fs_metadata"
     BACKUP_META = "backup_meta"
     SHELL_HISTORY = "shell_history"
+    # loose artefacts collected by generic evidence bundles (src/utils/bundle.py)
+    NETWORK_CAPTURE = "network_capture"
+    MEMORY_IMAGE = "memory_image"
+    CRASH_DUMP = "crash_dump"
+    VIDEO = "video"
+    AUDIO = "audio"
+    ARTIFACT = "artifact"
+    DISK_IMAGE_UNPARSED = "disk_image_unparsed"
+    COMPRESSED_EVIDENCE = "compressed_evidence"
 
 
 class Split(str, Enum):

@@ -39,9 +39,15 @@ class TextCell:
     def citation_sql(self) -> str:
         return f"SELECT {_q(self.column)} FROM {_q(self.table)} WHERE rowid = ?"
 
+    def citation_regex(self) -> str:
+        """Literal match of the value inside the file's decoded text (binary plists keep ASCII strings raw)."""
+        return re.escape(self.value)
+
     @property
     def where(self) -> str:
-        return f"{self.table}.{self.column} row {self.rowid}" if self.kind == "sql" else f"line {self.rowid}"
+        if self.kind == "sql":
+            return f"{self.table}.{self.column} row {self.rowid}"
+        return f"line {self.rowid}" if self.kind == "line" else f"plist string at {self.column}"
 
 
 class CaseTextIndex:
@@ -59,6 +65,8 @@ class CaseTextIndex:
                 self._index_db(entry.path)
             elif text_files and entry.extension in TEXT_FILE_EXTS and 0 < entry.size <= MAX_TEXT_FILE:
                 self._index_text(entry.path)
+            elif text_files and entry.extension == ".plist" and 0 < entry.size <= MAX_TEXT_FILE:
+                self._index_plist(entry.path)
         return self
 
     def _index_text(self, rel: str) -> None:
@@ -74,6 +82,43 @@ class CaseTextIndex:
             idx = len(self.cells)
             self.cells.append(TextCell(rel, "", "", n, line, kind="line"))
             for tok in set(_TOKEN.findall(normalize_text(line))):
+                self._postings[tok].add(idx)
+
+    def _index_plist(self, rel: str) -> None:
+        """String values of a property list. XML plists are cited by line like any text file; binary plists by
+        an escaped-literal regex over the decoded file text, which the verifier re-runs (``TextBridge.read_text``).
+        Only strings that appear verbatim in that decoded text are indexed (ASCII strings in bplist00)."""
+        import plistlib
+
+        raw = self.bridge.sandbox.resolve(rel).read_bytes()
+        if not raw.startswith(b"bplist00"):
+            self._index_text(rel)
+            return
+        try:
+            obj = plistlib.loads(raw)
+        except Exception:  # noqa: BLE001 - NSKeyedArchiver oddities / corrupt plists are skipped
+            self.skipped_dbs.append(f"{rel}: unreadable plist")
+            return
+        decoded = self.bridge.text.read_text(rel)
+        strings: list[tuple[str, str]] = []
+
+        def walk(o, key: str) -> None:
+            if isinstance(o, str):
+                strings.append((key, o))
+            elif isinstance(o, dict):
+                for k, v in o.items():
+                    walk(v, f"{key}/{k}" if key else str(k))
+            elif isinstance(o, (list, tuple)):
+                for i, v in enumerate(o[:5000]):
+                    walk(v, f"{key}[{i}]")
+
+        walk(obj, "")
+        for key, value in strings:
+            if not (self.min_len <= len(value) <= self.max_len) or value not in decoded:
+                continue
+            idx = len(self.cells)
+            self.cells.append(TextCell(rel, "", key[:200], 0, value, kind="regex"))
+            for tok in set(_TOKEN.findall(normalize_text(value))):
                 self._postings[tok].add(idx)
 
     def _index_db(self, rel: str) -> None:
@@ -129,5 +174,6 @@ class CaseTextIndex:
     def stats(self) -> dict:
         return {"cells": len(self.cells), "tokens": len(self._postings),
                 "databases": len({c.db for c in self.cells if c.kind == "sql"}),
-                "text_files": len({c.db for c in self.cells if c.kind == "line"}), "skipped_dbs": len(self.skipped_dbs),
+                "text_files": len({c.db for c in self.cells if c.kind == "line"}),
+                "plists": len({c.db for c in self.cells if c.kind == "regex"}), "skipped_dbs": len(self.skipped_dbs),
                 "skipped_columns": len(self.skipped_columns)}

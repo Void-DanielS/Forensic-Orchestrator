@@ -58,6 +58,9 @@ class Case:
     docs: tuple[Doc, ...] = ()
     questions: tuple[str, ...] = ()   # investigative questions given with the case, if any
     tags: tuple[str, ...] = field(default_factory=tuple)
+    publisher_notes: str = ""         # the publisher's own description (catalogue page), saved as a brief doc
+    source_url: str = ""              # landing page of the case at its publisher
+    answer_notes: str = ""            # publisher text that reveals the solution / plot: saved to answer_key only
 
     @property
     def dir(self) -> Path:
@@ -65,6 +68,19 @@ class Case:
 
     def evidence_ids(self) -> list[str]:
         return [e if isinstance(e, str) else e.evidence_id for e in self.evidence]
+
+
+def evidence_meta(e) -> dict:
+    """Uniform view of a mobile source id, a DiskEvidence or a RemoteEvidence."""
+    from src.utils import dataset_scraper as ds
+
+    if isinstance(e, str):
+        s = ds.SOURCES[e]
+        return {"evidence_id": e, "kind": "mobile", "title": s.title, "platform": s.platform, "group": s.group,
+                "transfer_gb": s.transfer_gb, "device": "", "note": s.note}
+    kind = "bundle" if type(e).__name__ == "RemoteEvidence" else "disk_image"
+    return {"evidence_id": e.evidence_id, "kind": kind, "title": e.title, "platform": e.platform, "group": e.group,
+            "transfer_gb": e.transfer_gb, "device": e.device, "note": e.note}
 
 
 def _m57(eid: str, img: str, desc: str, gb: float, group: str = "light") -> DiskEvidence:
@@ -76,7 +92,7 @@ def _m57(eid: str, img: str, desc: str, gb: float, group: str = "light") -> Disk
 _HICK = "Joshua Hickman reference image (Digital Corpora)"
 _MAG = "Magnet Forensics CTF (Digital Corpora)"
 
-CASES: dict[str, Case] = {c.case_id: c for c in (
+_CORE_CASES: dict[str, Case] = {c.case_id: c for c in (
     # ================================================================== computer-centred scenarios
     Case("m57_patents", "M57-Patents: exfiltration, eavesdropping and contraband at a start-up", 2009, "scenario",
          "M57.biz, a small patent-research start-up, ran for one month (Nov-Dec 2009). Four employees (Pat, the "
@@ -134,7 +150,14 @@ CASES: dict[str, Case] = {c.case_id: c for c in (
                           transfer_gb=3.0, note="anti-forensics: wiped with CCleaner before imaging"),
          ),
          docs=(Doc(f"{NARCOS}/Narcos_teacher_guide.zip", "answer_key", members=r"\.(pdf|xlsx)$"),),
-         tags=("windows", "multi-device", "drugs", "anti-forensics")),
+         tags=("windows", "multi-device", "drugs", "anti-forensics"),
+         publisher_notes="Due to intelligence provided by the Australian government, two passengers were "
+                         "intercepted by Customs upon arriving at Wellington, New Zealand from Brisbane.\n\n"
+                         "You are a Customs forensics investigator. Customs officers have delivered a forensic image "
+                         "and memory dump of the suspect's desktop computer to you. Your task is to determine the "
+                         "relationship between John Fredrickson and the suspect, their future intentions, and any "
+                         "other supporting evidence that pertains to the case.",
+         source_url="https://digitalcorpora.org/corpora/scenarios/"),
 
     Case("nist_data_leakage", "NIST CFReDS Data Leakage: confidential data taken by an employee", 2015, "scenario",
          "An employee (Mr. Informant) of a company is suspected of leaking confidential information to a "
@@ -216,7 +239,12 @@ CASES: dict[str, Case] = {c.case_id: c for c in (
     *(Case(f"hickman_{sid}", f"Reference device: {title}", year, "reference_device",
            f"{title} populated by the examiner with a documented set of apps and user activity. The image-creation "
            "document lists what was done and when; it is the investigation context.", _HICK, evidence=(sid,),
-           tags=(platform, "single-device", "reference"))
+           tags=(platform, "single-device", "reference"),
+           publisher_notes=f"An image of a {title} was created by Joshua Hickman: popular applications were "
+                           "populated with user data using each app's own capabilities (messaging, browsing, maps, "
+                           "photos, social media, games), over a documented period. Reconstruct the user's "
+                           "activity: accounts, communications, locations, media and app usage, with times.",
+           source_url="https://thebinaryhick.blog/public_images/")
       for sid, title, year, platform in (
           ("android_9", "Google Pixel 3, Android 9", 2019, "android"),
           ("android_10", "Google Pixel 3, Android 10", 2020, "android"),
@@ -227,6 +255,26 @@ CASES: dict[str, Case] = {c.case_id: c for c in (
           ("ios16", "iPhone, iOS 16", 2023, "ios"),
           ("ios17", "iPhone, iOS 17", 2024, "ios"))),
 )}
+
+
+def _all_cases() -> dict[str, Case]:
+    from src.cases.registry_ext import EXT_CASES
+
+    merged = dict(_CORE_CASES)
+    for c in EXT_CASES:
+        if c.case_id in merged:
+            raise ValueError(f"duplicate case id {c.case_id}")
+        merged[c.case_id] = c
+    seen: dict[str, str] = {}
+    for c in merged.values():
+        for eid in c.evidence_ids():
+            if eid in seen:
+                raise ValueError(f"evidence id {eid} used by {seen[eid]} and {c.case_id}")
+            seen[eid] = c.case_id
+    return merged
+
+
+CASES: dict[str, Case] = _all_cases()
 
 
 def case_of_evidence(evidence_id: str) -> Case | None:

@@ -46,3 +46,6 @@ desktop.ini
 *.zip
 *.7z
 *.tar.gz
+
+# Bundled third-party binaries (install per tools/README.md)
+tools/7zip/
