@@ -67,9 +67,16 @@ class HeuristicVerificationEngine:
     MIN_CORROBORATION_CHARS = 10
 
     def __init__(self, sandbox_root: Path | str, bridge: ForensicBridge | None = None):
+        # Without an explicit bridge the engine opens its own: its own hash cache and its own SQLite working
+        # copies, so nothing the agent computed (or cached) is reused to check the agent.
+        self.owns_bridge = bridge is None
         self.bridge = bridge or ForensicBridge(sandbox_root)
         self.sandbox = self.bridge.sandbox
         self.audit_log: list[dict] = []
+
+    def close(self) -> None:
+        if self.owns_bridge:
+            self.bridge.close()
 
     # ------------------------------------------------------------------ public API
     def verify_citation(self, c: Citation) -> VerificationResult:
@@ -85,6 +92,13 @@ class HeuristicVerificationEngine:
         if actual.lower() != c.expected_hash.lower():
             return self._log(VerificationResult(verified=False, reason="hash mismatch: evidence differs from cited version",
                                                 actual_hash=actual, hash_match=False, **base))
+        if c.locator_type == "sql_query":
+            sides = self.sandbox.side_hashes(c.file_path)
+            if {k: v.lower() for k, v in sides.items()} != {k: v.lower() for k, v in c.side_hashes.items()}:
+                return self._log(VerificationResult(
+                    verified=False, reason=f"side-file mismatch: cited {sorted(c.side_hashes)} vs present {sorted(sides)} "
+                                           "(WAL / journal differs from the version the agent read)",
+                    actual_hash=actual, hash_match=False, **base))
         try:
             ok, observed, reason = getattr(self, f"_check_{c.locator_type}")(c, path)
         except Exception as exc:  # noqa: BLE001 - any re-execution error is a failed verification
@@ -147,6 +161,20 @@ class HeuristicVerificationEngine:
         observed = render_exif_value(raw[c.exif_tag])
         ok = self._match(c, [observed])
         return ok, observed, "EXIF tag value matches" if ok else "EXIF tag value differs"
+
+    def _check_registry(self, c: Citation, path: Path) -> tuple[bool, str | None, str]:
+        observed = self.bridge.registry.read(c.file_path, c.registry)  # type: ignore[arg-type]
+        if observed is None:
+            return False, None, "registry key / value not present"
+        ok = self._match(c, [observed])
+        return ok, observed, "registry value matches" if ok else "registry value differs"
+
+    def _check_evtx_record(self, c: Citation, path: Path) -> tuple[bool, str | None, str]:
+        observed = self.bridge.evtx.summary(c.file_path, c.evtx_record)  # type: ignore[arg-type]
+        if observed is None:
+            return False, None, "event record not present"
+        ok = self._match(c, [observed])
+        return ok, observed, "event record matches" if ok else "event record differs"
 
     # ------------------------------------------------------------------ helpers
     @staticmethod

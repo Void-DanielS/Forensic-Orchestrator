@@ -35,6 +35,8 @@ class BridgeRecord(BaseModel):
     sql_params: list[Any] = Field(default_factory=list)
     regex: Optional[str] = None
     exif_tag: Optional[str] = None
+    registry: Optional[str] = None
+    evtx_record: Optional[int] = None
     raw_text_snippet: str
     snippet_encoding: Literal["utf-8", "hex"] = "utf-8"
     match_mode: Literal["exact", "contains"] = "exact"
@@ -46,6 +48,7 @@ class BridgeRecord(BaseModel):
     def to_citation(self) -> Citation:
         return Citation(file_path=self.file_path, locator_type=self.locator_type, byte_offset=self.byte_offset,
                         line_number=self.line_number, sql_query=self.sql_query, sql_params=list(self.sql_params),
-                        regex=self.regex, exif_tag=self.exif_tag, expected_hash=self.sha256,
+                        regex=self.regex, exif_tag=self.exif_tag, registry=self.registry,
+                        evtx_record=self.evtx_record, expected_hash=self.sha256,
                         raw_text_snippet=self.raw_text_snippet, snippet_encoding=self.snippet_encoding,
                         match_mode=self.match_mode)

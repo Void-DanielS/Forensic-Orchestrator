@@ -1,0 +1,761 @@
+{
+ "case_id": "nist_data_leakage",
+ "source": "context/answer_key/leakage-answers.pdf, section 6 (NIST CFReDS, 2018-07-23). Local times are EDT (UTC-04:00) and were converted to UTC.",
+ "excluded": {
+  "1": "acquisition hashes (not evidence content)",
+  "2": "partition table (acquisition)",
+  "23": "answer is a long ShellBag / USN listing",
+  "38": "location question",
+  "40": "location question",
+  "42": "yes/no",
+  "43": "descriptive",
+  "44": "long Windows Search listing",
+  "45": "long Windows Search listing",
+  "46": "long Windows Search listing",
+  "47": "VSS location",
+  "48": "descriptive diff",
+  "49": "duplicate of 30",
+  "50": "explanation",
+  "54": "inference",
+  "55": "duplicate of 53",
+  "57": "inference",
+  "58": "narrative timeline",
+  "59": "narrative",
+  "60": "diagram",
+  "14": "location question",
+  "15": "long URL listing (covered by 16 and 52)"
+ },
+ "questions": [
+  {
+   "id": "3",
+   "question": "Installed OS details (name, build, registered owner, install date)",
+   "answer": "Windows 7 Ultimate SP1, build 7601, owner informant, installed 2015-03-22 14:34:26 UTC",
+   "all": [
+    [
+     "windows 7 ultimate"
+    ],
+    [
+     "7601"
+    ],
+    [
+     "registered owner informant"
+    ],
+    [
+     "2015-03-22t14:34:26"
+    ]
+   ]
+  },
+  {
+   "id": "4",
+   "question": "Time zone setting",
+   "answer": "Eastern Time (US & Canada), UTC-05:00",
+   "all": [
+    [
+     "cat:win.timezone"
+    ],
+    [
+     "eastern"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "5",
+   "question": "Computer name",
+   "answer": "INFORMANT-PC",
+   "all": [
+    [
+     "informant-pc"
+    ]
+   ]
+  },
+  {
+   "id": "6",
+   "question": "User accounts (non-system)",
+   "answer": "informant, admin11, ITechTeam, temporary",
+   "all": [
+    [
+     "cat:win.user_profile|users/informant",
+     "cat:win.event|user informant"
+    ],
+    [
+     "cat:win.user_profile|users/admin11",
+     "cat:win.event|user admin11"
+    ],
+    [
+     "cat:win.event|user itechteam"
+    ],
+    [
+     "cat:win.user_profile|users/temporary",
+     "cat:win.event|user temporary"
+    ]
+   ]
+  },
+  {
+   "id": "7",
+   "question": "Last user to log on",
+   "answer": "informant",
+   "all": [
+    [
+     "cat:win.last_logon|defaultusername informant",
+     "cat:win.event|user informant"
+    ]
+   ]
+  },
+  {
+   "id": "8",
+   "question": "Last recorded shutdown",
+   "answer": "2015-03-25 11:31:05 EDT = 15:31:05 UTC",
+   "all": [
+    [
+     "cat:win.shutdown"
+    ],
+    [
+     "2015-03-25t15:31:05"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "9",
+   "question": "DHCP network interface",
+   "answer": "IP 10.11.11.129, DHCP server 10.11.11.254, domain localdomain",
+   "all": [
+    [
+     "10.11.11.129"
+    ],
+    [
+     "10.11.11.254"
+    ],
+    [
+     "localdomain"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "10",
+   "question": "Applications installed by the suspect",
+   "answer": "Office 2013, Chrome, Apple Application Support, Bonjour, Apple Software Update, Google Drive, .NET 4, Eraser",
+   "all": [
+    [
+     "microsoft office professional plus 2013"
+    ],
+    [
+     "cat:win.installed_program|google chrome"
+    ],
+    [
+     "apple application support"
+    ],
+    [
+     "bonjour"
+    ],
+    [
+     "apple software update"
+    ],
+    [
+     "cat:win.installed_program|google drive"
+    ],
+    [
+     ".net framework 4"
+    ],
+    [
+     "cat:win.installed_program|eraser"
+    ]
+   ]
+  },
+  {
+   "id": "11",
+   "question": "Application execution",
+   "answer": "IE11 setup, googledrivesync, icloudsetup, Excel, PowerPoint, StikyNot, Chrome, Outlook, Eraser, ccsetup504, CCleaner64, Word, xpsrchvw",
+   "all": [
+    [
+     "cat:win.prefetch|ie11-windows6.1-x64-en-us.exe",
+     "cat:win.userassist|ie11-windows6.1-x64-en-us.exe"
+    ],
+    [
+     "cat:win.prefetch|googledrivesync.exe",
+     "cat:win.userassist|googledrivesync.exe"
+    ],
+    [
+     "cat:win.prefetch|icloudsetup.exe",
+     "cat:win.userassist|icloudsetup.exe"
+    ],
+    [
+     "cat:win.prefetch|excel.exe",
+     "cat:win.userassist|excel.exe"
+    ],
+    [
+     "cat:win.prefetch|powerpnt.exe",
+     "cat:win.userassist|powerpnt.exe"
+    ],
+    [
+     "cat:win.prefetch|stikynot.exe",
+     "cat:win.userassist|stikynot.exe"
+    ],
+    [
+     "cat:win.prefetch|chrome.exe",
+     "cat:win.userassist|chrome.exe"
+    ],
+    [
+     "cat:win.prefetch|outlook.exe",
+     "cat:win.userassist|outlook.exe"
+    ],
+    [
+     "cat:win.prefetch|eraser.exe",
+     "cat:win.userassist|eraser.exe"
+    ],
+    [
+     "cat:win.prefetch|ccsetup504.exe",
+     "cat:win.userassist|ccsetup504.exe"
+    ],
+    [
+     "cat:win.prefetch|ccleaner64.exe",
+     "cat:win.userassist|ccleaner64.exe"
+    ],
+    [
+     "cat:win.prefetch|winword.exe",
+     "cat:win.userassist|winword.exe"
+    ],
+    [
+     "cat:win.prefetch|xpsrchvw.exe",
+     "cat:win.userassist|xpsrchvw.exe"
+    ]
+   ]
+  },
+  {
+   "id": "12",
+   "question": "System on/off and logon/logoff traces",
+   "answer": "boot / shutdown and logon / logoff events",
+   "all": [
+    [
+     "(event 6005)"
+    ],
+    [
+     "(event 6006)"
+    ],
+    [
+     "(event 4624)"
+    ],
+    [
+     "(event 4634)",
+     "(event 4647)"
+    ]
+   ]
+  },
+  {
+   "id": "13",
+   "question": "Web browsers used",
+   "answer": "Internet Explorer 11, Google Chrome 41",
+   "all": [
+    [
+     "cat:ie.url"
+    ],
+    [
+     "cat:chrome.url"
+    ]
+   ]
+  },
+  {
+   "id": "16",
+   "question": "Search keywords in web browsers",
+   "answer": "20 searches (data leakage methods ... data recovery tools)",
+   "all": [
+    [
+     "data leakage methods"
+    ],
+    [
+     "leaking confidential information"
+    ],
+    [
+     "information leakage cases"
+    ],
+    [
+     "intellectual property theft"
+    ],
+    [
+     "how to leak a secret"
+    ],
+    [
+     "file sharing and tethering"
+    ],
+    [
+     "dlp drm"
+    ],
+    [
+     "e-mail investigation"
+    ],
+    [
+     "what is windows system artifacts"
+    ],
+    [
+     "investigation on windows machine"
+    ],
+    [
+     "windows event logs"
+    ],
+    [
+     "cd burning method in windows"
+    ],
+    [
+     "external device and forensics"
+    ],
+    [
+     "cloud storage"
+    ],
+    [
+     "digital forensics"
+    ],
+    [
+     "how to delete data"
+    ],
+    [
+     "anti-forensics"
+    ],
+    [
+     "system cleaner"
+    ],
+    [
+     "how to recover data"
+    ],
+    [
+     "data recovery tools"
+    ]
+   ]
+  },
+  {
+   "id": "17",
+   "question": "Keywords in the Windows Explorer search bar",
+   "answer": "secret (2015-03-23)",
+   "all": [
+    [
+     "cat:win.search_term"
+    ],
+    [
+     "secret"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "18",
+   "question": "E-mail application",
+   "answer": "Microsoft Outlook 2013",
+   "all": [
+    [
+     "cat:win.prefetch|outlook.exe",
+     "cat:win.userassist|outlook.exe"
+    ]
+   ]
+  },
+  {
+   "id": "19",
+   "question": "E-mail file location",
+   "answer": "...\\Outlook\\iaman.informant@nist.gov.ost",
+   "all": [
+    [
+     "iaman.informant@nist.gov.ost"
+    ]
+   ]
+  },
+  {
+   "id": "20",
+   "question": "Suspect's e-mail account",
+   "answer": "iaman.informant@nist.gov",
+   "all": [
+    [
+     "iaman.informant@nist.gov"
+    ]
+   ]
+  },
+  {
+   "id": "21",
+   "question": "E-mails of the suspect",
+   "answer": "correspondence with spy.conspirator@nist.gov",
+   "all": [
+    [
+     "spy.conspirator@nist.gov"
+    ]
+   ],
+   "needs": "ost"
+  },
+  {
+   "id": "22",
+   "question": "External storage devices attached",
+   "answer": "SanDisk Cruzer Fit 4C530012450531101593 and 4C530012550531106501 (label IAMAN $_@)",
+   "all": [
+    [
+     "4c530012450531101593"
+    ],
+    [
+     "4c530012550531106501"
+    ],
+    [
+     "iaman $_@"
+    ]
+   ]
+  },
+  {
+   "id": "24",
+   "question": "IP of the company's shared network drive",
+   "answer": "10.11.11.128",
+   "all": [
+    [
+     "10.11.11.128"
+    ]
+   ]
+  },
+  {
+   "id": "25",
+   "question": "Directories traversed on RM#2",
+   "answer": "E:\\Secret Project Data\\design ...",
+   "all": [
+    [
+     "e:/secret project data"
+    ]
+   ],
+   "needs": "shellbag/jumplist"
+  },
+  {
+   "id": "26",
+   "question": "Files opened on RM#2",
+   "answer": "E:\\Secret Project Data\\design\\winter_whether_advisory.zip",
+   "all": [
+    [
+     "e:/secret project data/design/winter_whether_advisory.zip"
+    ]
+   ],
+   "needs": "shellbag/jumplist"
+  },
+  {
+   "id": "27",
+   "question": "Directories traversed on the network drive",
+   "answer": "\\\\10.11.11.128\\secured_drive\\Secret Project Data\\...",
+   "all": [
+    [
+     "//10.11.11.128/secured_drive/secret project data"
+    ]
+   ]
+  },
+  {
+   "id": "28",
+   "question": "Files opened on the network drive",
+   "answer": "(secret_project)_pricing_decision.xlsx",
+   "all": [
+    [
+     "(secret_project)_pricing_decision.xlsx"
+    ],
+    [
+     "10.11.11.128"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "29",
+   "question": "Cloud service traces",
+   "answer": "Google Drive (googledrivesync.exe, sync_log.log), Apple iCloud (icloudsetup.exe)",
+   "all": [
+    [
+     "googledrivesync"
+    ],
+    [
+     "icloudsetup.exe"
+    ],
+    [
+     "sync_log.log",
+     "google/drive"
+    ]
+   ]
+  },
+  {
+   "id": "30",
+   "question": "Files deleted from Google Drive",
+   "answer": "happy_holiday.jpg, do_u_wanna_build_a_snow_man.mp3",
+   "all": [
+    [
+     "happy_holiday.jpg"
+    ],
+    [
+     "do_u_wanna_build_a_snow_man.mp3"
+    ]
+   ]
+  },
+  {
+   "id": "31",
+   "question": "Google Drive account",
+   "answer": "iaman.informant.personal@gmail.com",
+   "all": [
+    [
+     "iaman.informant.personal@gmail.com"
+    ]
+   ]
+  },
+  {
+   "id": "32",
+   "question": "CD-R burning method",
+   "answer": "Windows built-in burning (Burn\\Burn staging folder)",
+   "all": [
+    [
+     "microsoft/windows/burn/burn"
+    ]
+   ]
+  },
+  {
+   "id": "33",
+   "question": "When the CD-R was burned",
+   "answer": "2015-03-24 15:47:47 and 15:56:11 EDT (19:47:47 / 19:56:11 UTC)",
+   "all": [
+    [
+     "2015-03-24t19:47:47",
+     "2015-03-24 19:47:47"
+    ],
+    [
+     "2015-03-24t19:56:1",
+     "2015-03-24 19:56:1"
+    ]
+   ],
+   "needs": "usnjrnl/event113"
+  },
+  {
+   "id": "34",
+   "question": "Files copied from PC to CD-R",
+   "answer": "17 files under Burn\\Burn (winter_storm.amr ... diary_#3p.txt) + Penguins/Koala/Tulips",
+   "all": [
+    [
+     "winter_storm.amr"
+    ],
+    [
+     "winter_whether_advisory.zip"
+    ],
+    [
+     "my_favorite_cars.db"
+    ],
+    [
+     "my_favorite_movies.7z"
+    ],
+    [
+     "new_years_day.jpg"
+    ],
+    [
+     "super_bowl.avi"
+    ],
+    [
+     "my_friends.svg"
+    ],
+    [
+     "my_smartphone.png"
+    ],
+    [
+     "new_year_calendar.one"
+    ],
+    [
+     "a_gift_from_you.gif"
+    ],
+    [
+     "landscape.png"
+    ],
+    [
+     "diary_#1d.txt"
+    ],
+    [
+     "diary_#1p.txt"
+    ],
+    [
+     "diary_#2d.txt"
+    ],
+    [
+     "diary_#2p.txt"
+    ],
+    [
+     "diary_#3d.txt"
+    ],
+    [
+     "diary_#3p.txt"
+    ]
+   ]
+  },
+  {
+   "id": "35",
+   "question": "Files opened from CD-R",
+   "answer": "D:\\de\\winter_whether_advisory.zip, D:\\Penguins.jpg ...",
+   "all": [
+    [
+     "d:/de/winter_whether_advisory.zip"
+    ],
+    [
+     "d:/penguins.jpg"
+    ]
+   ]
+  },
+  {
+   "id": "36",
+   "question": "Resignation file on the Desktop",
+   "answer": "Resignation_Letter_(Iaman_Informant).docx",
+   "all": [
+    [
+     "resignation_letter_(iaman_informant).docx"
+    ]
+   ]
+  },
+  {
+   "id": "37",
+   "question": "How the resignation file was printed",
+   "answer": "Printed to XPS: Desktop\\Resignation_Letter_(Iaman_Informant).xps",
+   "all": [
+    [
+     "resignation_letter_(iaman_informant).xps"
+    ]
+   ]
+  },
+  {
+   "id": "39",
+   "question": "Confidential files in Thumbcache",
+   "answer": "thumbcache_256 entries",
+   "all": [
+    [
+     "thumbcache_256"
+    ]
+   ],
+   "needs": "thumbcache"
+  },
+  {
+   "id": "41",
+   "question": "Sticky Notes content",
+   "answer": "Tomorrow... Everything will be OK...",
+   "all": [
+    [
+     "tomorrow"
+    ],
+    [
+     "everything will be ok"
+    ]
+   ],
+   "same_finding": true,
+   "needs": "ole2 (StickyNotes.snt)"
+  },
+  {
+   "id": "51",
+   "question": "Recycle Bin contents",
+   "answer": "Burn\\Burn\\prop, prog, pd, tr, Hydrangeas.jpg, Jellyfish.jpg ...",
+   "all": [
+    [
+     "burn/burn/prop"
+    ],
+    [
+     "burn/burn/prog"
+    ],
+    [
+     "burn/burn/pd"
+    ],
+    [
+     "burn/burn/tr"
+    ],
+    [
+     "hydrangeas.jpg"
+    ],
+    [
+     "jellyfish.jpg"
+    ]
+   ]
+  },
+  {
+   "id": "52",
+   "question": "Anti-forensics on 2015-03-25",
+   "answer": "searched, downloaded and ran Eraser and CCleaner",
+   "all": [
+    [
+     "cat:win.prefetch|eraser 6.2.0.2962.exe",
+     "cat:win.userassist|eraser 6.2.0.2962.exe"
+    ],
+    [
+     "cat:win.prefetch|ccsetup504.exe",
+     "cat:win.userassist|ccsetup504.exe"
+    ],
+    [
+     "cat:win.prefetch|ccleaner64.exe",
+     "cat:win.userassist|ccleaner64.exe"
+    ]
+   ]
+  },
+  {
+   "id": "53",
+   "question": "Deleted files recoverable from RM#2",
+   "answer": "17 files (winter_storm.amr ... diary_#3p.txt)",
+   "all": [
+    [
+     "winter_storm.amr"
+    ],
+    [
+     "winter_whether_advisory.zip"
+    ],
+    [
+     "my_favorite_cars.db"
+    ],
+    [
+     "my_favorite_movies.7z"
+    ],
+    [
+     "new_years_day.jpg"
+    ],
+    [
+     "super_bowl.avi"
+    ],
+    [
+     "my_friends.svg"
+    ],
+    [
+     "my_smartphone.png"
+    ],
+    [
+     "new_year_calendar.one"
+    ],
+    [
+     "a_gift_from_you.gif"
+    ],
+    [
+     "landscape.png"
+    ],
+    [
+     "diary_#1d.txt"
+    ],
+    [
+     "diary_#1p.txt"
+    ],
+    [
+     "diary_#2d.txt"
+    ],
+    [
+     "diary_#2p.txt"
+    ],
+    [
+     "diary_#3d.txt"
+    ],
+    [
+     "diary_#3p.txt"
+    ]
+   ],
+   "needs": "fat_recovery"
+  },
+  {
+   "id": "56",
+   "question": "Hidden files on CD-R RM#3",
+   "answer": "[secret_project]_revised_points.ppt, ..._detailed_design.pptx, ..._proposal.docx ...",
+   "all": [
+    [
+     "[secret_project]_revised_points.ppt"
+    ],
+    [
+     "[secret_project]_detailed_design.pptx"
+    ],
+    [
+     "[secret_project]_market_analysis.xlsx"
+    ],
+    [
+     "[secret_project]_technical_review_#1.docx"
+    ]
+   ],
+   "needs": "udf+carving"
+  }
+ ]
+}

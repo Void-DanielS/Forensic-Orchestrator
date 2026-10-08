@@ -70,6 +70,7 @@ def run_on_evidence(case, evidence_id: str, tracer=None, context=None, memory=No
     ev_dir = case.dir / "evidence" / evidence_id
     manifest = json.loads((ev_dir / "MANIFEST.json").read_text(encoding="utf-8"))
     bridge = ForensicBridge(ev_dir / "fs")
+    agent = None
     try:
         agent = AppArtifactAgent(bridge, tracer=tracer, context=context, memory=memory, evidence_id=evidence_id,
                                  run_id=run_id)
@@ -80,4 +81,6 @@ def run_on_evidence(case, evidence_id: str, tracer=None, context=None, memory=No
             return None
         return agent.run(dbs, output_dir=output_dir)
     finally:
+        if agent is not None:
+            agent.close()
         bridge.close()

@@ -1,0 +1,309 @@
+{
+ "case_id": "nist_hacking_case",
+ "source": "context/answer_key/TestAnswers.pdf (NIST CFReDS Hacking Case). Local times are CDT (UTC-05:00) and were converted to UTC.",
+ "excluded": {
+  "1": "acquisition hash",
+  "9": "count",
+  "11": "same answer as 10",
+  "15": "inference",
+  "28": "count",
+  "29": "yes/no",
+  "30": "count",
+  "31": "yes/no"
+ },
+ "questions": [
+  {
+   "id": "2",
+   "question": "Operating system",
+   "answer": "Windows XP",
+   "all": [
+    [
+     "cat:win.system_info|windows xp"
+    ]
+   ]
+  },
+  {
+   "id": "3",
+   "question": "Install date",
+   "answer": "08/19/04 17:48:27 CDT = 22:48:27 UTC",
+   "all": [
+    [
+     "2004-08-19t22:48:27"
+    ]
+   ]
+  },
+  {
+   "id": "4",
+   "question": "Time zone",
+   "answer": "Central Daylight Time",
+   "all": [
+    [
+     "cat:win.timezone"
+    ],
+    [
+     "central"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "5",
+   "question": "Registered owner",
+   "answer": "Greg Schardt",
+   "all": [
+    [
+     "registered owner greg schardt"
+    ]
+   ]
+  },
+  {
+   "id": "6",
+   "question": "Computer account name",
+   "answer": "N-1A9ODN6ZXK4LQ",
+   "all": [
+    [
+     "n-1a9odn6zxk4lq"
+    ]
+   ]
+  },
+  {
+   "id": "7",
+   "question": "Primary domain name",
+   "answer": "Evil",
+   "all": [
+    [
+     "cat:win.last_logon|defaultdomainname evil"
+    ]
+   ]
+  },
+  {
+   "id": "8",
+   "question": "Last recorded shutdown",
+   "answer": "08/27/04 10:46:33 CDT = 15:46:33 UTC",
+   "all": [
+    [
+     "cat:win.shutdown"
+    ],
+    [
+     "2004-08-27t15:46:33"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "10",
+   "question": "Account that mostly uses the computer",
+   "answer": "Mr. Evil",
+   "all": [
+    [
+     "cat:win.user_profile",
+     "cat:win.userassist",
+     "cat:win.last_logon"
+    ],
+    [
+     "mr. evil"
+    ]
+   ],
+   "same_finding": true
+  },
+  {
+   "id": "12",
+   "question": "File proving Greg Schardt is Mr. Evil",
+   "answer": "C:\\Program Files\\Look@LAN\\irunin.ini",
+   "all": [
+    [
+     "look@lan/irunin.ini"
+    ]
+   ]
+  },
+  {
+   "id": "13",
+   "question": "Network cards",
+   "answer": "Xircom CardBus Ethernet 100 + Modem 56; Compaq WL110 Wireless LAN PC Card",
+   "all": [
+    [
+     "xircom"
+    ],
+    [
+     "wl110"
+    ]
+   ]
+  },
+  {
+   "id": "14",
+   "question": "IP and MAC address",
+   "answer": "192.168.1.111, 0010a4933e09",
+   "all": [
+    [
+     "192.168.1.111"
+    ],
+    [
+     "0010a4933e09"
+    ]
+   ]
+  },
+  {
+   "id": "16",
+   "question": "Hacking programs installed",
+   "answer": "Cain & Abel, Ethereal, 123 Write All Stored Passwords, Anonymizer, CuteFTP, Look@LAN, NetStumbler",
+   "all": [
+    [
+     "cain"
+    ],
+    [
+     "ethereal"
+    ],
+    [
+     "123 write all stored passwords",
+     "123wasp"
+    ],
+    [
+     "anonymizer"
+    ],
+    [
+     "cuteftp"
+    ],
+    [
+     "look@lan"
+    ],
+    [
+     "netstumbler"
+    ]
+   ]
+  },
+  {
+   "id": "17",
+   "question": "Mr. Evil's SMTP e-mail address",
+   "answer": "whoknowsme@sbcglobal.net",
+   "all": [
+    [
+     "whoknowsme@sbcglobal.net"
+    ]
+   ]
+  },
+  {
+   "id": "18",
+   "question": "NNTP (news) server",
+   "answer": "news.dallas.sbcglobal.net",
+   "all": [
+    [
+     "news.dallas.sbcglobal.net"
+    ]
+   ]
+  },
+  {
+   "id": "19",
+   "question": "Programs showing the e-mail / news settings",
+   "answer": "Outlook Express, Forte Agent",
+   "all": [
+    [
+     "outlook express"
+    ],
+    [
+     "forte"
+    ]
+   ]
+  },
+  {
+   "id": "20",
+   "question": "Subscribed newsgroups",
+   "answer": "alt.2600.phreakz, alt.2600.cardz, alt.2600.crackz, alt.binaries.hacking.utilities, alt.stupidity.hackers.malicious ...",
+   "all": [
+    [
+     "alt.2600.phreakz"
+    ],
+    [
+     "alt.2600.cardz"
+    ],
+    [
+     "alt.2600.crackz"
+    ],
+    [
+     "alt.binaries.hacking.utilities"
+    ],
+    [
+     "alt.stupidity.hackers.malicious"
+    ]
+   ]
+  },
+  {
+   "id": "21",
+   "question": "mIRC user settings",
+   "answer": "user=Mini Me, nick=Mr, anick=mrevilrulez",
+   "all": [
+    [
+     "mini me"
+    ],
+    [
+     "mrevilrulez"
+    ]
+   ]
+  },
+  {
+   "id": "22",
+   "question": "IRC channels logged",
+   "answer": "Ushells.undernet.log, Elite.hackers.undernet.log, Mp3xserv.undernet.log ...",
+   "all": [
+    [
+     "ushells.undernet.log"
+    ],
+    [
+     "elite.hackers.undernet.log"
+    ],
+    [
+     "mp3xserv.undernet.log"
+    ]
+   ]
+  },
+  {
+   "id": "23",
+   "question": "File with the intercepted data (Ethereal)",
+   "answer": "Interception",
+   "all": [
+    [
+     "my documents/interception"
+    ]
+   ]
+  },
+  {
+   "id": "24",
+   "question": "Victim's wireless computer",
+   "answer": "Windows CE (Pocket PC)",
+   "all": [
+    [
+     "windows ce"
+    ]
+   ]
+  },
+  {
+   "id": "25",
+   "question": "Websites the victim accessed",
+   "answer": "mobile.msn.com, MSN Hotmail",
+   "all": [
+    [
+     "mobile.msn.com"
+    ]
+   ]
+  },
+  {
+   "id": "26",
+   "question": "Main user's web e-mail",
+   "answer": "mrevilrulez@yahoo.com",
+   "all": [
+    [
+     "mrevilrulez@yahoo.com"
+    ]
+   ]
+  },
+  {
+   "id": "27",
+   "question": "Yahoo mail saved copy file name",
+   "answer": "Showletter[1].htm",
+   "all": [
+    [
+     "showletter[1].htm"
+    ]
+   ]
+  }
+ ]
+}

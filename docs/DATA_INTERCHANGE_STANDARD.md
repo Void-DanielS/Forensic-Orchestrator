@@ -64,7 +64,9 @@ the physical evidence.** A value without a locator and hash is not data in this 
 | `sql_query` | `sql_query` = `SELECT "<col>" FROM "<table>" WHERE rowid = ?`, `sql_params` = `[rowid]` | `str(cell)` exactly as `sqlite3` returns it (ints as digits) | `bridge.sqlite.cell_record(db, table, column, rowid)` |
 | `line_number` | `line_number` (1-based) | the full line without the line ending | `bridge.text.line_record(path, n)` |
 | `exif_tag` | `exif_tag` = `"<IFD>.<TagName>"` | `render_exif_value(raw)` (rationals as `n/d`, tuples comma-joined) | `bridge.images.exif_record(path, tag)` |
-| `byte_offset` | `byte_offset` | the bytes at the offset: UTF-8 text, or hex with `snippet_encoding: "hex"` | (Sprint 2: carving / BLOB accessors) |
+| `byte_offset` | `byte_offset` | the bytes at the offset: UTF-8 text, or hex with `snippet_encoding: "hex"` | `windows_bridge.bytes_record(...)`, FileSystemAgent carving |
+| `registry` | `registry` = `"<key>::<value>"` or `"<key>"` | `render_registry_value(value)` (lists `\|`-joined, bytes hex) or the key's last-write time (ISO UTC) | `bridge.registry.record(path, key, value)` |
+| `evtx_record` | `evtx_record` = EventRecordID | `evtx_summary(xml)`: provider, EventID, record, time, data | `bridge.evtx.record(path, id, xml)` |
 | `regex` | `regex` (named group `v` = value) | the matched value; `match_mode: "contains"` only when the value is a substring | (Sprint 2: XML / plist / JSON accessors) |
 
 BLOB cells: cite them with `byte_offset` + hex in the database file or with a `regex` over a decoded text

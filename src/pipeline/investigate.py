@@ -73,6 +73,7 @@ def investigate(case_id: str, evidence: list[str] | None = None, limit: int = 0,
                                           evidence_id=eid, run_id=run_id)
             rep = agent.run(imgs, output_dir=run_dir)
             agent.release(keep_models=True)
+            agent.close()
             bridge.close()
             d = rep.to_dict()
             for k in totals:
@@ -99,6 +100,7 @@ def investigate(case_id: str, evidence: list[str] | None = None, limit: int = 0,
 AGENT_RUNNERS = {
     "apps": ("AppArtifactAgent", "src.agents.app_artifact_agent"),
     "fs": ("FileSystemAgent", "src.agents.filesystem_agent"),
+    "win": ("WindowsArtifactAgent", "src.agents.windows_agent"),
 }
 
 

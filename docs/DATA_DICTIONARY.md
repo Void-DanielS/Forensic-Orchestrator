@@ -133,13 +133,16 @@ data/datasets/<YYYYMMDD>/           ML export (§5) + finetune/ (§7)
 | Field | Type | Description |
 |---|---|---|
 | `file_path` | str | sandbox-relative file the evidence is in |
-| `locator_type` | enum | `byte_offset`, `line_number`, `sql_query`, `regex`, `exif_tag` |
+| `locator_type` | enum | `byte_offset`, `line_number`, `sql_query`, `regex`, `exif_tag`, `registry`, `evtx_record` |
 | `byte_offset` | int | 0-based offset (with `byte_offset`) |
 | `line_number` | int | 1-based line (with `line_number`) |
 | `sql_query`, `sql_params` | str, list | one read-only `SELECT`/`WITH`, positional `?` params; select rows by `rowid`/primary key |
 | `regex` | str | Python regex; named group `v` is the value, else the whole match |
 | `exif_tag` | str | `"<IFD>.<TagName>"`, IFD ∈ `0th`, `Exif`, `GPS`, `1st`, `Interop` (e.g. `GPS.GPSLatitude`) |
+| `registry` | str | `"<key path>::<value name>"` inside a hive (value rendered by `render_registry_value`), or `"<key path>"` for the key's last-write time |
+| `evtx_record` | int | EventRecordID inside an `.evtx` file; snippet is `evtx_summary(xml)` |
 | `expected_hash` | str | SHA-256 of `file_path` when read; a mismatch fails the citation |
+| `side_hashes` | dict | SQL citations only: SHA-256 of the `-wal` / `-journal` next to the database when read (`{"-wal": sha}`); the verifier requires the same set and hashes |
 | `raw_text_snippet` | str | the value the verifier must reproduce |
 | `snippet_encoding` | enum | `utf-8` (default) or `hex` |
 | `match_mode` | enum | `exact` (snippet equals a candidate) or `contains` |
@@ -281,10 +284,19 @@ A zero numeric value means "unset" (`utc` stays `null`).
 | `fs.sqlite_unlisted` | fs | verified (SQLite header bytes) |
 | `fs.orphan_wal` | fs | verified (WAL magic) |
 | `fs.hidden_path`, `fs.deleted_recovered` | fs | verified (first 16 bytes + hash: the file exists as described) |
-| `sqlite.carved_text` | fs | verified (exact bytes of the carved run in a free page / freeblock / unallocated cell area). Remnants of deleted rows: their *meaning* is an analyst's call |
+| `fs.mail_store` | fs | verified (first 16 bytes): a PST / OST / DBX / mbox container and where it is |
+| `sqlite.carved_text` | fs | verified (exact bytes of the carved run in a free page / freeblock / unallocated cell area). Remnants of deleted rows: their *meaning* is an analyst's call. Deduplicated per database; `value.score` (0..1) ranks them for triage only |
+| `win.system_info`, `win.computer_name`, `win.timezone`, `win.shutdown`, `win.network_interface`, `win.network_card`, `win.last_logon` | win | verified (each registry value re-read from the hive) |
+| `win.usb_device`, `win.portable_device`, `win.mountpoint` | win | verified (USBSTOR / USB / MountedDevices / Portable Devices / EMDMgmt / MountPoints2 values and key last-write times) |
+| `win.installed_program`, `win.user_profile` | win | verified (Uninstall, ProfileList, SAM user names; never hashes) |
+| `win.userassist`, `win.recent_doc`, `win.typed_url`, `win.search_term`, `win.run_mru` | win | verified (NTUSER values; ROT13 / UTF-16 decoding derived from the cited bytes) |
+| `win.prefetch`, `win.lnk`, `win.recycle_bin`, `ie.url` | win | verified (exact bytes at fixed offsets: names, FILETIMEs, run counts, paths) |
+| `win.event` | win | verified (`evtx_record`: the record's summary re-rendered from the log) |
 
 Apps findings carry `value = {table, rowid, fields, timestamps}`; every timestamp is a `ForensicTimestamp`.
 FS findings carry the manifest's `sha256`, `size`, `macb` and `original_path` in `value`.
+
+Windows findings carry `value.logical_path` (path inside the original volume) and decoded fields (UTC ISO times).
 
 New agents add categories as `<domain>.<item>` (e.g. `sms.message`, `chrome.visit`, `fs.magic_mismatch`) and
 register them here.

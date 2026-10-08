@@ -20,8 +20,7 @@ def _md(s: str, n: int = 160) -> str:
 
 
 def _cite(c: dict) -> str:
-    loc = {"byte_offset": c.get("byte_offset"), "line_number": c.get("line_number"), "sql_query": c.get("sql_query"),
-           "regex": c.get("regex"), "exif_tag": c.get("exif_tag")}[c["locator_type"]]
+    loc = c.get(c["locator_type"])     # the locator field is named after its type
     params = f" {c['sql_params']}" if c.get("sql_params") else ""
     return f"`{_md(c['file_path'], 70)}` {c['locator_type']}=`{_md(loc, 60)}`{params} sha256 `{c['expected_hash'][:12]}…`"
 
@@ -181,7 +180,13 @@ def write_agents_report(case, ctx: CaseContext, memory: InvestigationMemory, run
     for f in verified:
         by_cat[f["category"]].append(f)
     for c, fs in sorted(by_cat.items()):
-        w(f"### {c} ({len(fs)})")
+        if c == "sqlite.carved_text":
+            from src.agents.filesystem_agent import rank_carved
+
+            fs = rank_carved(fs)
+            w(f"### {c} ({len(fs)} distinct, ranked by triage score)")
+        else:
+            w(f"### {c} ({len(fs)})")
         w("| ID | Evidence | Statement | Citation(s) |")
         w("|---|---|---|---|")
         for f in fs[:per_category]:

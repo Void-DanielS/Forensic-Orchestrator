@@ -1,6 +1,46 @@
 # HANDOVER: ForensiAgent-Multimodal
 
-_Last updated: 2026-10-06, Sprint 1.5 (case database, computer images, context, GUI)._
+_Last updated: 2026-10-08, Sprint 2.5 (WindowsArtifactAgent, verifier hardening, scoring against answer keys).
+Read §0 first, then §1c / §1d. README.md is the full, peer-facing project report (results, metrics, limitations)._
+
+## 0. Sprint 2.5 (2026-10-08): what changed, results, how to resume
+
+**Asked by the user:** measure the agents against the answer keys, and close the gaps reported after Sprint 2
+(no Windows parsers, noisy carving, verifier sharing the agent's bridge / hash cache, `-wal` not covered by
+`expected_hash`, evidence inside OneDrive, stale README).
+
+| Gap | Fix | Where |
+|---|---|---|
+| No Windows artefacts (40 of 72 READY cases had no app findings) | `WindowsArtifactAgent`: SYSTEM / SOFTWARE / SAM (names only) / NTUSER hives, Prefetch, LNK, `$I` + `INFO2` Recycle Bin, IE `index.dat`, EVTX (selected IDs). New locators `registry` and `evtx_record` | `src/agents/windows_agent.py`, `src/bridge/windows_bridge.py` |
+| Verifier shared the agent's bridge and hash cache | `BaseAgent` builds its verifier on a **fresh** `ForensicBridge` (`owns_bridge`, `close()`); scoring re-verifies again with a new engine | `base_agent.py`, `heuristic_verifier.py` |
+| `-wal` / `-journal` not covered | `Citation.side_hashes`; filled in `BaseAgent.finding()` for SQL citations; verifier rejects on any side-file difference; SQLite working copies keyed on db + side hashes | `models.py`, `forensic_bridge.py` |
+| Carving noise | dedupe per database + `carve_score` triage rank (`value.score`); reports rank carved text | `filesystem_agent.py`, `case_report.py` |
+| Mail containers invisible | `fs.mail_store` (PST / OST / DBX / mbox) | `filesystem_agent.py` |
+| No measurement vs answer keys | `python main.py score`: fresh audit + gold questions + answer-key entity recall | `src/eval/scoring.py`, `src/eval/gold/*.json` |
+| Evidence in OneDrive | `FORENSI_DATA_DIR` env var (data was **not** moved; the user should move `data/` and set it) | `settings.py` |
+| EVTX slow (python-evtx, quadratic re-verification) | switched to pyevtx-rs (`evtx==0.13.1`) + per-file summary cache. **python-evtx must not be installed alongside (Evtx/evtx clash on Windows)** | `windows_bridge.py`, `requirements.txt` |
+
+**Results (2026-10-08):**
+* Corpus (`python main.py corpus`, apps + fs + win, 72 READY cases, ~28 min): **211,153 VERIFIED, 0 REJECTED**,
+  0 case errors (`data/outputs/corpus_runs/corpus_apps-fs-win.json`). Carved strings 158,539 → 128,970 after dedupe.
+  READY cases without app / system findings: 40 → 27.
+* Fresh audit (`python main.py score --cases all`): 211,203 / 211,203 still VERIFIED (`data/outputs/scores/`).
+* Gold: NIST Data Leakage **23 / 38 answered (60.5 %)**, mean credit 64.8 % (23 / 30 = 76.7 % within built
+  capabilities); NIST Hacking Case **11 / 23 (47.8 %)**. Per question: `data/cases/<case>/workspace/reports/score.md`.
+* Answer-key entity recall: 137 / 907 pooled over 19 cases (15.1 %); Data Leakage 37.2 %.
+* M57 has **no** gold set: `m57-instructor-packet.pdf` is password-protected; the other M57 key decks have no answers.
+* Tests: 176 pass.
+
+**Gold files** are transcribed by hand from the answer-key PDFs (questions, answers, requirement groups;
+`cat:<category>|text` and `same_finding` rules, `needs` for capabilities not built, `excluded` with reasons).
+Never load them, or `context/answer_key`, into an agent.
+
+**Next, by expected score gain:** (1) read file *content* (text / HTML / INI / logs, OST / PST / DBX bodies):
+most remaining Hacking Case answers and NIST Q21 / Q30 / Q31; (2) ShellBags, jump lists, `$UsnJrnl`, thumbcache,
+Sticky Notes, Windows.edb / WebCacheV01 (ESE); (3) gold sets for Lone Wolf, Owl, DFRWS; (4) Sprint 3 agents (§9).
+Avoid tuning parsers to the two gold cases: add generic artefacts and confirm they keep 0 REJECTED corpus-wide.
+
+**Resume:** `.venv/Scripts/python -m pytest` (176) → `python main.py corpus` → `python main.py score --cases all`.
 
 ## 1. State at a glance
 
@@ -14,16 +54,123 @@ _Last updated: 2026-10-06, Sprint 1.5 (case database, computer images, context, 
 | HeuristicVerificationEngine | `src/verification/heuristic_verifier.py` | ✅ self-test 12/12 on real data |
 | BaseAgent | `src/agents/base_agent.py` | ✅ done |
 | MultimodalVisionAgent | `src/agents/vision_agent.py` | ✅ PoC on real evidence (`data/outputs/android_10/POC_REPORT.md`) |
-| CLI | `main.py` | ✅ `config / fetch / inspect / verify-selftest / vision / pipeline` |
-| Unit tests | `tests/` | ✅ 78 pass (no GPU or dataset needed) |
-| FileSystemAgent, AppArtifactAgent | n/a | ⏳ Sprint 2 |
+| CLI | `main.py` | ✅ `cases / investigate / apps / fs / corpus / dataset / finetune / gui / …` |
+| Unit tests | `tests/` | ✅ 176 pass (no GPU or dataset needed; real-corpus tests skip when data is absent) |
+| **Case corpus** (generic remote evidence) | `src/cases/registry_ext.py`, `src/utils/bundle.py`, `src/utils/remote.py` | ✅ **108 cases registered, 72 READY**, 100 evidence items, 162,793 files, 43 GB (§1c) |
+| **AppArtifactAgent** (27 parser specs) | `src/agents/app_artifact_agent.py`, `src/agents/parsers/` | ✅ corpus run: 0 rejected (§1d) |
+| **FileSystemAgent** (signatures, hidden, deleted, WAL, SQLite carving) | `src/agents/filesystem_agent.py` | ✅ corpus run: 0 rejected (§1d) |
+| **WindowsArtifactAgent** (registry, Prefetch, LNK, EVTX, Recycle Bin, index.dat) | `src/agents/windows_agent.py`, `src/bridge/windows_bridge.py` | ✅ corpus run: 0 rejected (§0) |
+| **Scoring vs answer keys** (audit, gold questions, entity recall) | `src/eval/` | ✅ NIST Data Leakage 60.5 %, Hacking Case 47.8 % (§0) |
 | TimelineAgent, OrchestratorAuditorAgent | n/a | ⏳ Sprint 3 |
 
 **Sprint 1 priority (set by the user):** gather a large amount of real data, plus a *small* PoC
 of the first agent on one or two images with real results. Both are done.
 
-The project is **not a git repository** yet (the folder was renamed from `forensi_agent`; `.venv/Scripts/*.exe` launchers are stale — use `.venv/Scripts/python -m pip`). Run `git init` before Sprint 2, and add
-`.venv/`, `data/cases/`, `data/datasets/`, `data/_spool/` and `data/outputs/` to `.gitignore`.
+**Repository:** `https://github.com/Void-DanielS/Forensic-Orchestrator` (`main`); Sprint 1.6 + 2 are on branch
+`sprint-2`. Evidence, datasets, outputs, `.venv/` and the bundled 7-Zip binaries (`tools/7zip/`, see
+`tools/README.md`) are not in git: rebuild the corpus locally with `main.py cases build`. The `.venv/Scripts/*.exe`
+launchers are stale (folder renamed) — use `.venv/Scripts/python -m pip`.
+
+**Where things stand / how to resume (2026-10-07):**
+1. `python main.py cases list` → READY count (72). A fetch of `mvs_2023` (iPhone FFS, 338 k members) was still
+   running when this was written; re-running the build resumes / skips finished items.
+2. Retry the pending items in §1c (Google Drive quota resets in about 24 h):
+   `python main.py cases build --cases <ids> --groups light,heavy,extended`.
+3. `python main.py corpus` re-runs AppArtifactAgent + FileSystemAgent over every READY case (≈ 10 min).
+4. Then Sprint 3 (§9).
+
+## 1c. Sprint 1.6 (2026-10-07): corpus expanded to 108 public cases
+
+The user asked for **at least 100 investigations, each with its images and its context**, before agent work
+continued. The registry now holds **108 cases** (`src/cases/registry.py` core 18 + `registry_ext.py` 90);
+**72 are READY** (`python main.py cases list`: at least one evidence item extracted plus a brief of at least 300
+characters or published questions). The user accepted 72 as enough to proceed (2026-10-07); the rest are queued.
+
+| Source | Cases | Notes |
+|---|---|---|
+| Digital Corpora | Nitroba, M57-Jean, NGDC 2012 (7 devices), Tuck, NPS-2011 x4, Casper-RW, Domex users, Nexus One/S, Hickman Android 6/7/8/11/12 | NGDC uses the final daily snapshot of each device |
+| NIST CFReDS | Hacking Case (31 questions), Rhino Hunt, Russian Tea Room, 10 CFTT chip-off/JTAG phones | CFTT data-population docs are the brief |
+| DFRWS | 2005, 2008, 2009, 2010, 2011 (two scenarios), 2016, 2017, 2018, 2023 + CIRCL wiped disk | README results/submissions go to the answer key; scenario text to the brief |
+| Ali Hadi (archive.org) | 13 challenges | #6 (archive.org 500 on the file) and #13 (needs re-run) pending |
+| CTFs | DFIR Madness 001, MVS 2023/2024/2026, MSAB 2026, Cellebrite 2021/2023/2024/2025, NFI Rodeo 2023 | published zip passwords are in the registry, never in manifests or reports |
+| Other | TechHive, Bart the hacker, OU Red-Petya server, OU defaced web server, Cado AWS EKS, DSTL ground truth, UTFPR x2, 18 VTO drone models | |
+
+**How evidence is fetched now.** `RemoteEvidence` (`src/utils/bundle.py`) describes any item as remote files/folders:
+
+* `src/utils/remote.py`: one range-readable source for S3/HTTP, Google Drive files and folders, archive.org (`ia:`),
+  GitHub (`gh:`, LFS aware), Digital Corpora prefixes (`dc:`), figshare, Zenodo, Dropbox and the Wayback Machine.
+  Drive quota / rate-limit pages are detected and waited out; archive.org gets 3 connections (it throttles 12).
+* Dispatch by content: EWF/raw images go to TSK (now also **LVM2** via libvslvm, and **XFS / APFS** via dissect:
+  `src/utils/dissect_fs.py`); ZIP is range-read (encrypted / Deflate64 members go to 7-Zip); TAR/TGZ is streamed;
+  7z/RAR/bz2/xz use the bundled **7-Zip 24.09 in `tools/7zip`** with *selective* extraction; loose pcap, memory,
+  mail, logs and video are copied.
+* Images TSK cannot parse are kept byte-for-byte when under the cap (`disk_image_unparsed`); archives whose members
+  are too large unpacked (sparse RAM dumps) are kept compressed (`compressed_evidence`). Everything else over a cap
+  is listed in `MANIFEST.json -> not_fetched` with its URL and size.
+* Documents shipped with evidence are routed to `context/brief`, `answer_key` (solution, write-up, results) or
+  `acquisition` (FTK logs, hashes). `publisher_notes` holds scenario text only; plot-revealing text goes to
+  `answer_notes` (saved under `answer_key`).
+* `case.json -> readiness`, and catalogue columns `questions, brief_chars, context_level, ready`.
+
+**Pending** (re-run with `python main.py cases build --cases <ids> --groups light,heavy,extended`):
+
+* Google Drive quota / rate limit (retry after about 24 h): `cellebrite_ctf_2021`, `cellebrite_ctf_2023`, the
+  remaining `vto_*` drones, `utfpr_server_hacked` (XFS now supported), `techhive`, `cellebrite_ctf_2024/2025`.
+* Fixed after their first attempt, need a re-run: `hickman_android_6` (Deflate64 zip), `cftt_lg_optimus_hub`
+  (raw cap), `ou_defaced_webserver` (root FS on LVM), `ahadi_13_unallocated` (kept compressed), `mvs_2024` (stream
+  stopped at a document save; delete `evidence/mvs2024_pixel3` first to fetch it fully).
+* Very large, not finished: `tuck_2019` (49 GB, APFS now supported), `hickman_android_12` (42 GB), `mvs_2026`,
+  `msab_ctf_2026`; NPS-2011 x4, the remaining CFTT phones and `mvs_2023` were still running in build A.
+* Dropped: BelkaCTF (archive passwords no longer public), Magnet 2018 (download files are 1.8 KB stubs), Hickman
+  MediaFire mirrors (private now), DFRWS 2006/2007 (pure carving benchmarks, no investigation).
+
+**Warning: evidence inside OneDrive.** Two extracted `desktop.ini` files (m57_terry, ahadi_01) disappeared from
+disk after a clean inspection; OneDrive / Explorer treat `desktop.ini` specially. Workspace writes also hit
+transient `WinError 5` locks (now retried, `src/utils/fsio.py`). **Move `data/cases` out of the OneDrive folder**
+(or exclude it from sync) before relying on the hashes in court-style reports.
+
+## 1d. Sprint 2 (2026-10-07): AppArtifactAgent + FileSystemAgent
+
+Both agents are deterministic (no model, role `text`), subclass `BaseAgent`, and emit findings whose citations the
+HeuristicVerificationEngine re-executes. **Corpus run over all 72 READY cases (`python main.py corpus`):
+199,093 findings VERIFIED, 0 REJECTED, 0 case failures** (summary: `data/outputs/corpus_runs/corpus_apps-fs.json`;
+per case: `workspace/runs/<run>/` and `workspace/reports/<run>_agents.md`).
+
+**AppArtifactAgent.** `src/agents/parsers/` holds declarative `TableSpec`s (27): candidate column names per field
+(schemas drift across versions), an epoch per time field (`cocoa_auto` / `unix_auto` detect the unit), and lookups
+into related tables (WhatsApp chat to JID, iMessage handle, Safari visit to URL, contact mimetype). Each row becomes
+one finding; each quoted cell is a citation `SELECT "<col>" FROM "<table>" WHERE rowid = ?`. BLOB cells are never
+quoted. Families: Android SMS (mmssms, Google Messages bugle_db), contacts, call log, calendar, accounts; iOS
+Messages, AddressBook, CallHistory, KnowledgeC, Notes, Calendar, Photos (GPS); Chromium URLs / searches / downloads,
+Firefox (desktop and Fenix), Safari; WhatsApp (Android old/new schema, iOS), Skype, Facebook Messenger, LINE, Kik,
+TikTok. Validation: all 16 distinct SMS documented in the Android 10 `SMS-Messages.xlsx` are recovered and VERIFIED
+(text and UTC second): `tests/test_sprint2_agents.py::test_android10_documented_sms_are_recovered_and_verified`.
+
+**FileSystemAgent.** Per extracted file: `fs.magic_mismatch`, `fs.sqlite_unlisted`, `fs.orphan_wal`,
+`fs.hidden_path`, `fs.deleted_recovered`, and **SQLite carving** (`sqlite.carved_text`: freelist trunk and leaf
+pages, freeblocks, unallocated cell space), each cited by `byte_offset` + hex. Credential stores (Login Data, Web
+Data, keychains, key4.db, accounts.db, cookies, anything named *password*) are never carved (FDX B8); leftover
+schema text is dropped.
+
+| Category | Corpus count | | Category | Corpus count |
+|---|---|---|---|---|
+| sqlite.carved_text | 158,539 | | chrome.url | 3,596 |
+| knowledgec.event | 10,339 | | fs.sqlite_unlisted | 3,252 |
+| fs.deleted_recovered | 7,373 | | sms.message | 3,098 |
+| fs.orphan_wal | 2,701 | | firefox.url | 2,388 |
+| fs.hidden_path | 1,655 | | fs.magic_mismatch | 1,426 |
+| call.log | 1,335 | | calendar.event | 829 |
+| chrome.search | 513 | | imessage.message | 351 |
+
+Other Sprint 2 pieces: binary plists in `CaseTextIndex` (strings cited by an escaped-literal `regex`, which the
+verifier re-runs over the decoded file); `investigate_agents()` and `write_agents_report()`; CLI `apps`, `fs`,
+`corpus`, `investigate --agents apps,fs`; trace event `parser`; memory saves throttled (at most one per 5 s);
+FileCategory enum and dictionary §6.2 / §6.4 updated; `docs/schemas/` regenerated.
+
+**Known gaps (next).** Carving is noisy (158 k strings: rank and deduplicate before showing analysts); Windows
+browsers in ESE (`WebCacheV01.dat`) and registry / EVTX / LNK / Prefetch parsing are not done (40 of 72 cases have
+no app-database findings, mostly Windows images); Telegram / Signal / Snapchat bodies are BLOBs (not parsed); the
+verifier still shares the agent's bridge and hash cache; `-wal` side files are not covered by `expected_hash`.
 
 ## 1b. Sprint 1.5 (2026-10-06): case database, computer images, context, GUI
 
@@ -247,80 +394,45 @@ VRAM of 6.5 GB allocated and 10.1 GB reserved.
 
 ---
 
-## 8. Copy-paste prompt: Sprint 2 (AppArtifactAgent + FileSystemAgent)
+## 8. Sprint 2: done (see §1d)
 
-```
-You are continuing ForensiAgent-Multimodal in C:\Forensic - Orchestrator\forensic_agent.
-Read HANDOVER.md and README.md first, then src/agents/base_agent.py, src/agents/vision_agent.py,
-src/bridge/forensic_bridge.py, src/verification/heuristic_verifier.py, src/verification/models.py
-and src/utils/dataset_scraper.py, src/utils/disk_image.py, src/cases/*, src/context/case_context.py,
-src/pipeline/investigate.py. Use the existing .venv and the case database in data/cases/
-(data/cases/catalog.sqlite lists cases and evidence; each sandbox is data/cases/<case>/evidence/<id>/fs). Do not re-download.
-Run `python -m pytest` and `python main.py verify-selftest` first to confirm a green baseline.
-
-Goal: two agents that subclass BaseAgent and emit Finding objects whose citations the
-HeuristicVerificationEngine re-executes. Follow docs/DATA_INTERCHANGE_STANDARD.md (FDX): every parser /
-bridge accessor returns src.schemas.BridgeRecord (cite with record.to_citation()), times are
-ForensicTimestamp via to_timestamp(), new categories go into src/schemas/common.py and docs/DATA_DICTIONARY.md. All DB access goes through bridge.sqlite (working copies;
-never open evidence in place). Run them across ALL cases, including the Windows / removable / Linux disk images (FILELIST.jsonl.gz has every
-MFT/inode entry with MACB times and deleted flags).
-
-1. src/agents/app_artifact_agent.py: AppArtifactAgent(role="text")
-   - Parsers in src/agents/parsers/, one module per artifact, each with a `detect(sandbox)` that finds its
-     DBs by path pattern (paths differ per Android/iOS version and between Hickman/Magnet/DFRWS images):
-     Android SMS (mmssms.db), contacts2.db, calllog, WhatsApp msgstore.db (+wa.db), Chrome History
-     (urls/visits/downloads/keyword_search_terms; WebKit epoch), iOS sms.db, AddressBook, CallHistory,
-     Safari History.db, KnowledgeC, and at least three third-party messengers present in the corpus
-     (Telegram, Signal, Snapchat, Discord, Kik, TikTok...).
-   - Each record becomes a Finding with a sql_query citation selecting the row by primary key; the
-     raw_text_snippet is the exact stored value. Normalise timestamps to UTC ISO-8601 in Finding.value
-     and keep the raw value and epoch type.
-   - Validate against case context: android_10/_case_context/SMS-Messages.xlsx and the image-creation
-     PDFs (.txt alongside). Write tests that the SMS parser recovers the documented messages.
-2. src/agents/filesystem_agent.py: FileSystemAgent(role="text")
-   - Walk each sandbox with bridge.fs: MACB timestamps, SHA-256 (reuse MANIFEST.json hashes), extension vs
-     magic mismatch, hidden paths, SQLite without a .db extension, orphan -wal files, SQLite freelist /
-     unallocated-cell carving for deleted records (cite with byte_offset + hex snippet).
-   - Add pytsk3/dfvfs support so the registered physical images android_7/android_8 (blk0_mmcblk0.bin)
-     can be fetched: stream the .bin to the spool, open the userdata partition, extract with the same
-     selectors. Then move them from group "future" to "extended" in dataset_scraper.SOURCES.
-3. Extend CaseTextIndex to XML/JSON/plist text so vision corroboration covers those artifacts.
-4. main.py: add `apps` and `fs` subcommands; make `pipeline` run all three agents per source and write
-   data/cases/<case>/workspace/runs/<run_id>/<agent>__<evidence>_findings.json, emitting trace events (src/agents/trace.py)
-   and context links like the vision agent, so the GUI shows them live.
-5. Tests: per-parser unit tests on tiny synthetic DBs in tests/fixtures, plus an integration test on the real
-   corpus (skipped when a source is missing). Keep 0 REJECTED on real data; investigate any rejection
-   rather than loosening the verifier.
-6. Update HANDOVER.md (state, results, next prompt) at the end.
-Constraints: single GPU cuda:0 with a 12 GB budget. Never write into data/cases/*/evidence/*/fs. Never load context/answer_key into an agent. Never print
-credentials from _case_context in reports.
-```
+The original Sprint 2 prompt is fulfilled: parsers and AppArtifactAgent, FileSystemAgent with carving, XML / JSON /
+plist indexing, `apps` / `fs` subcommands, per-agent findings, traces and context links, synthetic per-parser tests
+and a real-corpus integration test, 0 REJECTED on real data. Raw physical dumps (android_7/8, CFTT chip-offs) are
+fetched through the generic bundle (TSK / LVM / dissect) rather than a separate dfvfs path.
 
 ## 9. Copy-paste prompt: Sprint 3 (TimelineAgent + OrchestratorAuditorAgent)
 
 ```
-You are continuing ForensiAgent-Multimodal in C:\Forensic - Orchestrator\forensic_agent.
-Read HANDOVER.md (including the Sprint 2 section), README.md and all of src/. Run `python -m pytest`
-and `python main.py --source android_10 pipeline --limit 5` to confirm the baseline.
+You are continuing ForensiAgent-Multimodal in C:\Users\danie\OneDrive\Forensic - Orchestrator\forensic_agent.
+Read HANDOVER.md (§1c corpus and §1d Sprint 2 first), README.md, docs/DATA_INTERCHANGE_STANDARD.md and all of src/.
+Run `python -m pytest` (176 pass) and `python main.py score --cases gold` to confirm the baseline (Data Leakage
+23 / 38, Hacking Case 11 / 23).
+First, finish the pending fetches listed in §1c (Drive quota permitting) so more cases are READY.
 
 1. src/agents/timeline_agent.py: TimelineAgent(role="text")
-   - Input: VERIFIED findings only (data/cases/<case>/workspace/runs/*/*_findings.json) plus FILELIST MACB entries.
-   - Unified UTC timeline per source. Handle unix s/ms, WebKit, Cocoa (s and ns), FILETIME, and EXIF local
-     time + OffsetTimeOriginal. The Hickman documentation uses EST (UTC-5).
-   - Cross-source correlation (e.g. photo EXIF time/GPS vs messages and browser activity within a window).
-     A correlation Finding cites the union of the underlying citations, so it verifies only if all of them do.
-   - Validate against the timelines in the image-creation PDFs (_case_context/*.txt).
-   - Optional: a small local LLM (4-bit, cuda:0) summarises clusters. Its output is UNCORROBORATED unless
-     every sentence maps to cited findings.
+   - Input: VERIFIED findings only (data/cases/<case>/workspace/runs/*/*_findings.json: vision, apps, fs) plus
+     FILELIST.jsonl.gz MACB entries and MANIFEST macb. Use the ForensicTimestamp already in each finding's
+     value.timestamps (raw + epoch + utc); never re-guess time zones. EXIF without an offset stays local time.
+   - Unified UTC timeline per case (all evidence items). Cross-source correlation (photo EXIF GPS/time vs
+     messages, calls, browser visits, KnowledgeC app usage within a window). A correlation Finding cites the
+     union of the underlying citations, so it verifies only if all of them do.
+   - Validate against the timelines in the image-creation documents (context/brief/*.txt; Hickman uses EST).
+   - Optional: a small local LLM (4-bit, cuda:0) summarises clusters; its output is UNCORROBORATED unless every
+     sentence maps to cited findings.
 2. src/agents/orchestrator_auditor.py: OrchestratorAuditorAgent(role="orchestrator")
-   - Plans and dispatches agents per source, re-verifies every finding at the end with a fresh
-     HeuristicVerificationEngine and fresh hashes, and drops anything not VERIFIED from the evidence sections.
-   - Use a FRESH ForensicBridge/verifier (no shared hash cache) and hash -wal/-journal side files too.
-   - Score against context/answer_key (never give it to agents); per case, all evidence items together.
-   - data/cases/<case>/workspace/reports/case_report.md: case summary, device info (from verified findings only), timeline,
-     per-agent evidence tables with citations (file, locator, SHA-256), a separate "Model observations
-     (not evidence)" appendix, and verification statistics. Every evidence sentence references a finding_id.
-3. Dual-GPU readiness: run with FORENSI_SINGLE_GPU=0 on one GPU to confirm the fallback warning path works.
-   Document the expected VRAM per role.
-4. Tests + update HANDOVER.md.
+   - Plans and dispatches agents per evidence item (vision for images, apps for databases, fs for everything),
+     re-verifies every finding at the end with a FRESH ForensicBridge + HeuristicVerificationEngine (no shared
+     hash cache), hashes -wal/-journal side files too, and drops anything not VERIFIED from the evidence sections.
+   - Rank sqlite.carved_text (deduplicate; prefer runs near deleted rows or matching brief entities) before reporting.
+   - Score with src/eval/scoring.py (gold questions + entity recall); never give the answer key to agents.
+   - data/cases/<case>/workspace/reports/case_report.md: case summary, device info (verified only), timeline,
+     per-agent evidence tables with citations, a "Model observations (not evidence)" appendix, verification stats.
+     Every evidence sentence references a finding_id.
+3. Raise the answer-key score without tuning to the gold cases (see §0 "Next"): file-content findings
+   (text / HTML / mail stores), ShellBags, jump lists, $UsnJrnl, ESE (WebCacheV01.dat, Windows.edb). Re-run
+   `python main.py corpus` and `python main.py score --cases all` after each; REJECTED must stay 0.
+4. Dual-GPU readiness check (FORENSI_SINGLE_GPU=0 on one GPU gives the fallback warning). Tests + update HANDOVER.md.
+Constraints: single GPU cuda:0, 12 GB budget. Never write into data/cases/*/evidence/*/fs. Never load
+context/answer_key into an agent. Never print credentials or archive passwords in reports.
 ```

@@ -57,7 +57,7 @@ class AgentReport:
 
 def _citation_brief(c: Citation) -> dict[str, Any]:
     loc = {"byte_offset": c.byte_offset, "line_number": c.line_number, "sql_query": c.sql_query,
-           "regex": c.regex, "exif_tag": c.exif_tag}[c.locator_type]
+           "regex": c.regex, "exif_tag": c.exif_tag, "registry": c.registry, "evtx_record": c.evtx_record}[c.locator_type]
     return {"file": c.file_path, "locator_type": c.locator_type, "locator": loc, "params": c.sql_params or None,
             "snippet": c.raw_text_snippet[:200], "sha256": c.expected_hash}
 
@@ -70,7 +70,8 @@ class BaseAgent(ABC):
                  tracer=None, context=None, memory=None, evidence_id: str | None = None, run_id: str | None = None):
         self.bridge = bridge
         self.sandbox = bridge.sandbox
-        self.verifier = verifier or HeuristicVerificationEngine(bridge.sandbox.root, bridge=bridge)
+        # Independent verifier by default: a fresh bridge (own hash cache, own SQLite working copies).
+        self.verifier = verifier or HeuristicVerificationEngine(bridge.sandbox.root)
         self.device = settings.device_for(self.role)
         self.errors: list[str] = []
         self.tracer = tracer or NullTracer()
@@ -102,9 +103,17 @@ class BaseAgent(ABC):
         return Citation(file_path=rel, locator_type=locator_type, expected_hash=self.sandbox.hash(rel),
                         raw_text_snippet=snippet, **locator)
 
+    def close(self) -> None:
+        """Release the verifier's own bridge (its SQLite working copies)."""
+        self.verifier.close()
+
     def finding(self, artifact: str, category: str, claim: str, **kw: Any) -> Finding:
         f = Finding(agent=self.name, artifact_path=artifact, category=category, claim=claim,
                     evidence_id=self.evidence_id, **kw)
+        for c in f.citations:
+            if c.locator_type == "sql_query" and not c.side_hashes:
+                # the query read the database merged with its WAL / journal: those bytes are cited too
+                c.side_hashes = self.sandbox.side_hashes(c.file_path)
         self.tracer.emit("finding", artifact=artifact, finding_id=f.finding_id, category=category, claim=claim,
                          observed_text=f.observed_text, citations=[_citation_brief(c) for c in f.citations],
                          model=f.model)

@@ -13,7 +13,9 @@
             "line_number",
             "sql_query",
             "regex",
-            "exif_tag"
+            "exif_tag",
+            "registry",
+            "evtx_record"
           ],
           "title": "Locator Type",
           "type": "string"
@@ -83,9 +85,40 @@
           "default": null,
           "title": "Exif Tag"
         },
+        "registry": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registry"
+        },
+        "evtx_record": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evtx Record"
+        },
         "expected_hash": {
           "title": "Expected Hash",
           "type": "string"
+        },
+        "side_hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Side Hashes",
+          "type": "object"
         },
         "raw_text_snippet": {
           "title": "Raw Text Snippet",

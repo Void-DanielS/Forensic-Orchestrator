@@ -1,4 +1,4 @@
-"""ForensiAgent-Multimodal CLI (Sprint 1).
+"""ForensiAgent-Multimodal CLI.
 
     python main.py config                       # show device allocation
     python main.py fetch [--source android_10]  # download + inspect public reference image
@@ -191,7 +191,7 @@ def cmd_investigate(a: argparse.Namespace) -> int:
 
 
 def cmd_agents(a: argparse.Namespace) -> int:
-    """apps / fs / investigate --agents apps,fs: deterministic agents over one case."""
+    """apps / fs / win / investigate --agents apps,fs,win: deterministic agents over one case."""
     from src.pipeline.investigate import investigate_agents
 
     agents = a.agents.split(",") if getattr(a, "agents", "") else [a.cmd]
@@ -203,7 +203,7 @@ def cmd_agents(a: argparse.Namespace) -> int:
 
 
 def cmd_corpus(a: argparse.Namespace) -> int:
-    """Run the AppArtifactAgent + FileSystemAgent over every READY case; summary in data/outputs/corpus_runs/."""
+    """Run the deterministic agents (apps, fs, win) over every READY case; summary in data/outputs/corpus_runs/."""
     from collections import Counter
 
     from src.cases.builder import readiness
@@ -238,6 +238,40 @@ def cmd_corpus(a: argparse.Namespace) -> int:
     path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"[corpus] {len(ready)} cases totals={dict(totals)} -> {path}")
     return 0 if not totals.get("rejected") else 2
+
+
+def cmd_score(a: argparse.Namespace) -> int:
+    """Score verified findings against answer keys (gold questions + answer-key entity recall)."""
+    from src.cases.builder import readiness
+    from src.cases.registry import CASES
+    from src.eval.scoring import GOLD_DIR, score_case, write_case_score
+
+    if a.cases == "gold":
+        ids = sorted(p.stem for p in GOLD_DIR.glob("*.json"))
+    elif a.cases == "all":
+        ids = [c.case_id for c in CASES.values() if readiness(c)["ready"]]
+    else:
+        ids = a.cases.split(",")
+    rows = []
+    for cid in ids:
+        case = CASES[cid]
+        cs = score_case(case, reverify=not a.no_reverify)
+        path = write_case_score(case, cs)
+        d = cs.to_dict()
+        g = d["gold"]["all"] if d["gold"] else None
+        e = d["entity_recall"]
+        rows.append({"case_id": cid, "audit": {k: v for k, v in d["audit"].items() if k != "failures"},
+                     "gold": g, "gold_covered": d["gold"]["covered_capabilities"] if d["gold"] else None,
+                     "entity_recall": {k: e.get(k) for k in ("entities", "found", "recall_pct", "on_target_pct")},
+                     "report": str(path)})
+        print(f"[score] {cid}: audit={rows[-1]['audit'] or '-'} gold={g or '-'} entity_recall={e.get('recall_pct', '-')} %"
+              f" -> {path}", flush=True)
+    out = settings.OUTPUTS_DIR / "scores"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"scores_{a.cases if a.cases in ('all', 'gold') else 'selected'}.json").write_text(
+        json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    failed = sum((r["audit"] or {}).get("failed", 0) for r in rows)
+    return 0 if not failed else 2
 
 
 def cmd_dataset(a: argparse.Namespace) -> int:
@@ -295,7 +329,7 @@ def cmd_pipeline(a: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # type: ignore[attr-defined]
-    ap = argparse.ArgumentParser(description="ForensiAgent-Multimodal (Sprint 1)")
+    ap = argparse.ArgumentParser(description="ForensiAgent-Multimodal")
     ap.add_argument("--source", "--evidence", dest="source", default="android_10", choices=_all_evidence_ids())
     sub = ap.add_subparsers(dest="cmd", required=True)
     pc = sub.add_parser("cases", help="case database: list | build | catalog")
@@ -313,11 +347,12 @@ def main(argv: list[str] | None = None) -> int:
     pi.add_argument("--no-vlm", action="store_true")
     pi.add_argument("--no-ocr", action="store_true")
     pi.add_argument("--run-id", default="")
-    pi.add_argument("--agents", default="", help="apps,fs: run the deterministic agents instead of vision")
+    pi.add_argument("--agents", default="", help="apps,fs,win: run the deterministic agents instead of vision")
     pi.add_argument("--no-carve", action="store_true")
     pi.set_defaults(fn=lambda a: cmd_agents(a) if a.agents else cmd_investigate(a))
     for name, helptext in (("apps", "AppArtifactAgent: SMS, calls, contacts, chats, browser history (verified rows)"),
-                           ("fs", "FileSystemAgent: signature mismatches, hidden/deleted files, SQLite carving")):
+                           ("fs", "FileSystemAgent: signature mismatches, hidden/deleted files, SQLite carving"),
+                           ("win", "WindowsArtifactAgent: registry, Prefetch, LNK, EVTX, Recycle Bin, IE history")):
         pa = sub.add_parser(name, help=helptext)
         pa.add_argument("--case", required=True)
         pa.add_argument("--items", default="", help="comma-separated evidence ids (default: all fetched)")
@@ -325,12 +360,16 @@ def main(argv: list[str] | None = None) -> int:
         pa.add_argument("--run-id", default="")
         pa.add_argument("--no-carve", action="store_true")
         pa.set_defaults(fn=cmd_agents, agents="")
-    pco = sub.add_parser("corpus", help="run apps+fs over every READY case (summary in data/outputs/corpus_runs)")
-    pco.add_argument("--agents", default="apps,fs")
+    pco = sub.add_parser("corpus", help="run apps+fs+win over every READY case (summary in data/outputs/corpus_runs)")
+    pco.add_argument("--agents", default="apps,fs,win")
     pco.add_argument("--cases", default="all")
     pco.add_argument("--limit", type=int, default=0)
     pco.add_argument("--no-carve", action="store_true")
     pco.set_defaults(fn=cmd_corpus)
+    psc = sub.add_parser("score", help="score verified findings against answer keys (workspace/reports/score.md)")
+    psc.add_argument("--cases", default="gold", help="gold (cases with gold questions) | all (READY) | ids")
+    psc.add_argument("--no-reverify", action="store_true", help="skip the fresh re-verification audit")
+    psc.set_defaults(fn=cmd_score)
     sub.add_parser("dataset", help="export the case database as ML dataset tables (data/datasets/)").set_defaults(
         fn=cmd_dataset)
     pf = sub.add_parser("finetune", help="build FDX TrainingSample JSONL from a dataset export (or --validate a file)")

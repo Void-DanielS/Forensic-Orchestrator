@@ -85,6 +85,17 @@ class Sandbox:
             self._hash_cache[key] = sha256_file(full)
         return self._hash_cache[key]
 
+    def side_hashes(self, rel: str | Path) -> dict[str, str]:
+        """SHA-256 of the SQLite ``-wal`` / ``-journal`` next to ``rel`` (only those present)."""
+        from src.verification.models import SIDE_SUFFIXES
+
+        out = {}
+        for suffix in SIDE_SUFFIXES:
+            side = f"{Path(rel).as_posix()}{suffix}"
+            if self.resolve(side).is_file():
+                out[suffix] = self.hash(side)
+        return out
+
 
 # --------------------------------------------------------------------------------------
 # SQLite
@@ -163,7 +174,11 @@ class SQLiteBridge:
 
     def _working_copy(self, rel: str) -> Path:
         src = self.sandbox.resolve(rel)
+        # keyed on the database AND its side files: a changed WAL must not be served from a stale copy
         digest = self.sandbox.hash(rel)
+        sides = self.sandbox.side_hashes(rel)
+        if sides:
+            digest = hashlib.sha256((digest + "".join(f"{k}{v}" for k, v in sorted(sides.items()))).encode()).hexdigest()
         if digest in self._copies:
             return self._copies[digest]
         dst = working_copy(src, self.workdir / digest[:16])
@@ -424,6 +439,10 @@ class ForensicBridge:
         self.images = ImageMetadataBridge(self.sandbox)
         self.text = TextBridge(self.sandbox)
         self.fs = FileSystemBridge(self.sandbox)
+        from src.bridge.windows_bridge import EvtxBridge, RegistryBridge
+
+        self.registry = RegistryBridge(self.sandbox)
+        self.evtx = EvtxBridge(self.sandbox)
 
     def close(self) -> None:
         self.sqlite.cleanup()

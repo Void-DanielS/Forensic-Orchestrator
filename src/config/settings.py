@@ -39,7 +39,11 @@ def _env_float(name: str, default: float) -> float:
 SINGLE_GPU_MODE: bool = _env_bool("FORENSI_SINGLE_GPU", True)
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
-DATA_DIR: Path = PROJECT_ROOT / "data"
+# Evidence, case workspaces and outputs. Keep them OUTSIDE a OneDrive / Dropbox folder: sync clients treat files
+# such as desktop.ini specially and lock files mid-write, which breaks evidence hashes. Example:
+#   FORENSI_DATA_DIR=D:\forensi_data   (move the existing data/ folder there first)
+DATA_DIR: Path = (Path(os.environ["FORENSI_DATA_DIR"]).resolve() if os.environ.get("FORENSI_DATA_DIR")
+                  else PROJECT_ROOT / "data")
 RAW_IMAGES_DIR: Path = DATA_DIR / "raw_images"
 OUTPUTS_DIR: Path = DATA_DIR / "outputs"
 

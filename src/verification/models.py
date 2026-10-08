@@ -14,7 +14,11 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-LocatorType = Literal["byte_offset", "line_number", "sql_query", "regex", "exif_tag"]
+LocatorType = Literal["byte_offset", "line_number", "sql_query", "regex", "exif_tag", "registry", "evtx_record"]
+
+# SQLite side files whose content a query can read (the WAL is merged into the working copy). ``-shm`` is a
+# rebuildable index, not data, so it is not part of the cited evidence.
+SIDE_SUFFIXES = ("-wal", "-journal")
 
 
 class Citation(BaseModel):
@@ -33,7 +37,11 @@ class Citation(BaseModel):
     sql_params: list[Any] = Field(default_factory=list)
     regex: Optional[str] = None
     exif_tag: Optional[str] = None             # "<IFD>.<TagName>", e.g. "GPS.GPSLatitude"
+    registry: Optional[str] = None             # "<key path>" or "<key path>::<value name>" inside a hive
+    evtx_record: Optional[int] = None          # EventRecordID inside an .evtx file
     expected_hash: str
+    # SHA-256 of the -wal / -journal next to a cited database at read time ({"-wal": sha}); SQL citations only.
+    side_hashes: dict[str, str] = Field(default_factory=dict)
     raw_text_snippet: str
     snippet_encoding: Literal["utf-8", "hex"] = "utf-8"
     match_mode: Literal["exact", "contains"] = "exact"
@@ -46,6 +54,8 @@ class Citation(BaseModel):
             "sql_query": self.sql_query,
             "regex": self.regex,
             "exif_tag": self.exif_tag,
+            "registry": self.registry,
+            "evtx_record": self.evtx_record,
         }
         if field_for[self.locator_type] is None:
             raise ValueError(f"locator_type={self.locator_type} requires field '{self.locator_type}'")

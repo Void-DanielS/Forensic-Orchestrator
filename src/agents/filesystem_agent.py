@@ -7,6 +7,7 @@ Per extracted file (from ``MANIFEST.json``, which carries the hashes and MACB ti
 * ``fs.orphan_wal``         a SQLite ``-wal`` journal whose main database is absent (uncommitted data)
 * ``fs.hidden_path``        a user file inside a dot-directory / dot-file (outside app-private trees)
 * ``fs.deleted_recovered``  a file recovered from an unallocated directory entry (disk images)
+* ``fs.mail_store``         a mailbox container (Outlook PST / OST, Outlook Express DBX, mbox): where mail lives
 * ``sqlite.carved_text``    readable text in SQLite free pages, freeblocks and unallocated cell space:
                             remnants of deleted rows
 
@@ -63,9 +64,46 @@ APP_PRIVATE = re.compile(r"(^|/)(data/data|data/user(_de)?/\d+|private/var/mobil
 NO_CARVE = re.compile(r"(^|/)(login data( for account)?|web data|keychain[^/]*|key4\.db|logins\.json|signons\.sqlite|"
                       r"cookies|accounts(_ce|_de)?\.db|[^/]*password[^/]*|[^/]*passwd[^/]*|[^/]*credential[^/]*)$", re.I)
 SCHEMA_TEXT = re.compile(r"CREATE\s+(TABLE|INDEX|UNIQUE|VIEW|TRIGGER|VIRTUAL)|sqlite_(autoindex|sequence|stat)|"
-                         r"PRIMARY KEY|INTEGER NOT NULL|COLLATE", re.I)
+                         r"PRIMARY KEY|INTEGER NOT NULL|\bCOLLATE\b", re.I)
 MIN_RUN = 12            # minimum printable characters for a carved text run
 MAX_CARVED_PER_DB = 300
+_SIGNAL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+|https?://|www\.|\+?\d[\d ()-]{7,}\d|\b\d{4}-\d\d-\d\d\b", re.I)
+_REGION_WEIGHT = {"freelist_leaf": 1.0, "freelist_trunk": 0.9, "freeblock": 0.8, "unallocated": 0.6}
+
+
+def carve_score(text: str, region: str) -> float:
+    """Triage rank of a carved run, 0..1 (deterministic; never changes evidentiary status).
+
+    Favours prose-like text (letters and spaces, several words), identifiers (e-mail, URL, phone, date) and
+    freelist space (whole deleted pages) over unallocated cell gaps, and penalises repetitive / symbol-heavy runs.
+    """
+    n = len(text)
+    if not n:
+        return 0.0
+    letters = sum(ch.isalpha() for ch in text) / n
+    spaces = text.count(" ") / n
+    words = len(re.findall(r"[A-Za-z\u00C0-\u024F]{3,}", text))
+    variety = len(set(text.lower())) / min(n, 40)
+    score = (0.35 * min(letters + spaces, 1.0) + 0.2 * min(words / 6, 1.0) + 0.15 * min(variety, 1.0)
+             + 0.1 * min(n / 80, 1.0) + 0.2 * (1.0 if _SIGNAL.search(text) else 0.0))
+    return round(score * _REGION_WEIGHT.get(region, 0.6), 3)
+
+
+def rank_carved(findings: Sequence, top: int | None = None) -> list:
+    """Carved findings (``Finding`` or dicts) best-first, keeping one per distinct normalised text."""
+    def val(f):
+        return f.value if hasattr(f, "value") else f.get("value", {})
+
+    seen, out = set(), []
+    for f in sorted(findings, key=lambda f: -(val(f) or {}).get("score", 0.0)):
+        key = re.sub(r"\W+", " ", (val(f) or {}).get("text", "")).strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out[:top] if top else out
+
+
+MAIL_STORE = re.compile(r"\.(pst|ost|dbx|mbx|nsf)$|(^|/)(thunderbird|mail)/.*/(inbox|sent|drafts|trash)$", re.I)
 
 
 def _sig(head: bytes) -> str | None:
@@ -108,6 +146,10 @@ class FileSystemAgent(BaseAgent):
         return {"sha256": m.get("sha256"), "size": m.get("size"), "category": m.get("category"),
                 "macb": m.get("macb"), "member_mtime": m.get("member_mtime"),
                 "original_path": m.get("original_path") or m.get("source_member"), **extra}
+
+    def _logical(self, rel: str) -> str:
+        m = self.meta.get(rel, {})
+        return (m.get("original_path") or rel).replace("\\", "/")
 
     # ------------------------------------------------------------------ analysis
     def analyze_artifact(self, rel: str) -> list[Finding]:
@@ -153,6 +195,11 @@ class FileSystemAgent(BaseAgent):
                                           "app_database", "database", "email", "artifact"):
             out.append(self.finding(rel, "fs.hidden_path", f"File in a hidden (dot) path: {rel}",
                                     value=self._base_value(rel), citations=[self._head_cite(rel, 16)]))
+
+        if MAIL_STORE.search(self._logical(rel)):
+            out.append(self.finding(rel, "fs.mail_store", f"Mail store: {self._logical(rel)}",
+                                    value=self._base_value(rel, store=PurePosixPath(rel).suffix.lower() or "mbox"),
+                                    citations=[self._head_cite(rel, 16)]))
 
         if m.get("deleted"):
             out.append(self.finding(rel, "fs.deleted_recovered",
@@ -210,6 +257,7 @@ class FileSystemAgent(BaseAgent):
                 regions.append((fo + 4, min(fo + ln, base + page_size), "freeblock", pno))
                 fb, hops = nxt, hops + 1
         out: list[Finding] = []
+        emitted: set[str] = set()       # the same deleted string often survives in several free regions
         pattern = re.compile(rb"(?:[\x20-\x7e]|[\xc2-\xdf][\x80-\xbf]|[\xe0-\xef][\x80-\xbf]{2}|\x09|\x0a){%d,}" % MIN_RUN)
         for start, end, kind, pno in regions:
             if end <= start:
@@ -219,9 +267,13 @@ class FileSystemAgent(BaseAgent):
                 text = raw.decode("utf-8", "replace").strip()
                 if len(set(text)) < 5 or len(re.findall(r"[A-Za-z]", text)) < 6 or SCHEMA_TEXT.search(text):
                     continue          # padding / binary noise / leftover schema text
+                if text in emitted:
+                    continue
+                emitted.add(text)
                 out.append(self.finding(rel, "sqlite.carved_text",
                                         f"Text in SQLite {kind} space (page {pno}) of {rel}: {text[:140]}",
                                         value={"text": text, "region": kind, "page": pno, "offset": mt.start(),
+                                               "score": carve_score(text, kind),
                                                "length": len(raw), "page_size": page_size,
                                                "sha256": self.meta.get(rel, {}).get("sha256")},
                                         citations=[self.cite(rel, "byte_offset", raw.hex(), byte_offset=mt.start(),
@@ -238,6 +290,7 @@ def run_on_evidence(case, evidence_id: str, tracer=None, context=None, memory=No
     ev_dir = case.dir / "evidence" / evidence_id
     manifest = json.loads((ev_dir / "MANIFEST.json").read_text(encoding="utf-8"))
     bridge = ForensicBridge(ev_dir / "fs")
+    agent = None
     try:
         agent = FileSystemAgent(bridge, manifest=manifest, carve=carve, tracer=tracer, context=context, memory=memory,
                                 evidence_id=evidence_id, run_id=run_id)
@@ -246,6 +299,8 @@ def run_on_evidence(case, evidence_id: str, tracer=None, context=None, memory=No
             files = files[:limit]
         return agent.run(files, output_dir=output_dir) if files else None
     finally:
+        if agent is not None:
+            agent.close()
         bridge.close()
 
 

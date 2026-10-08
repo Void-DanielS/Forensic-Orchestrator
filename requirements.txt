@@ -1,4 +1,4 @@
-# ForensiAgent-Multimodal - Sprint 1 (tested on Windows 11, Python 3.12, CUDA 12.8)
+# ForensiAgent-Multimodal (tested on Windows 11, Python 3.12, CUDA 12.8)
 #
 # Blackwell GPUs (RTX 50xx) need the cu128 torch wheels:
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
@@ -35,6 +35,10 @@ libewf-python==20260924
 libvslvm-python==20260901
 dissect.xfs==3.13
 dissect.apfs==1.1
+# Windows artefacts (src/agents/windows_agent.py): registry hives, event logs, shortcuts
+regipy==6.4.0
+evtx==0.13.1          # pyevtx-rs; do not install python-evtx alongside (Evtx/evtx clash on Windows)
+LnkParse3==1.6.0
 # 7-Zip 24.09 is bundled in tools/7zip (7z, rar, split zip, Deflate64, vmdk/vhd)
 
 # Tests
