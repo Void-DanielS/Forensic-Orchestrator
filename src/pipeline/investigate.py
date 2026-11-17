@@ -101,6 +101,8 @@ AGENT_RUNNERS = {
     "apps": ("AppArtifactAgent", "src.agents.app_artifact_agent"),
     "fs": ("FileSystemAgent", "src.agents.filesystem_agent"),
     "win": ("WindowsArtifactAgent", "src.agents.windows_agent"),
+    "jev": ("JevAgent", "src.agents.jev_agent"),        # trained model: leads only (UNCORROBORATED)
+    "mm": ("ImageTriageAgent", "src.agents.mm_agent"),  # trained multimodal model: leads only (UNCORROBORATED)
 }
 
 

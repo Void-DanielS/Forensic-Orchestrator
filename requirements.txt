@@ -17,6 +17,7 @@ bitsandbytes==0.50.2
 huggingface_hub==1.33.0
 qwen-vl-utils==0.0.14
 easyocr==1.7.2
+timm==1.0.15                 # Jev-MM: CLIP ViT-B/32 image encoder (weights read from the local HF cache)
 
 # Forensics / data
 pillow==12.3.0

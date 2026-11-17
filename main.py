@@ -49,6 +49,20 @@ def cmd_cases(a: argparse.Namespace) -> int:
     unknown = [c for c in ids if c not in CASES]
     if unknown:
         sys.exit(f"unknown case(s) {unknown}; see: python main.py cases list")
+    if a.action in ("audit", "repair"):
+        from src.utils import integrity
+
+        sel = [CASES[c] for c in ids]
+        if a.action == "audit":
+            res = integrity.audit(sel, do_hash=not a.no_hash)
+            md = integrity.write_audit(res)
+            print(md.read_text(encoding="utf-8")[:4000])
+            return 1 if res.problems else 0
+        out = integrity.repair(sel, dry_run=a.dry_run)
+        print(json.dumps({k: v for k, v in out.items() if k not in ("restored",)}, indent=1)[:6000])
+        print(f"[repair] restored {len(out['restored'])}, not restored {len(out['not_restored'])}, "
+              f"protected {out['protected_read_only']} at-risk files -> {out['summary_path']}")
+        return 0 if not out["not_restored"] else 1
     only = {x.strip() for x in a.only.split(",") if x.strip()} or None
     if only:
         ids = [c for c in ids if only & set(CASES[c].evidence_ids())] or ids
@@ -296,6 +310,145 @@ def cmd_finetune(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_jev(a: argparse.Namespace) -> int:
+    """Jev typed-answer model: build the fragment dataset, train / evaluate it, or ask it about a file."""
+    if a.action == "build":
+        from src.ml.fragments import build
+
+        out = build(max_files=a.max_files)
+        print((out / "DATASHEET.md").read_text(encoding="utf-8"))
+        return 0
+    if a.action == "train":
+        from src.ml.train import train
+
+        res = train(Path(a.dataset) if a.dataset else None, epochs=a.epochs, batch=a.batch, lr=a.lr, seed=a.seed)
+        print((Path(res["run"]) / "REPORT.md").read_text(encoding="utf-8"))
+        print(f"[jev] checkpoint {res['checkpoint']}")
+        return 0
+    if a.action == "eval":
+        from src.ml.train import evaluate
+
+        print(json.dumps(evaluate(Path(a.checkpoint) if a.checkpoint else None,
+                                  Path(a.dataset) if a.dataset else None), indent=2))
+        return 0
+    from src.ml.jev import FRAG, Jev
+
+    if not a.file:
+        raise SystemExit("jev ask needs --file (and optionally --offset, --ext)")
+    with open(a.file, "rb") as fh:
+        fh.seek(a.offset)
+        frag = fh.read(FRAG)
+    jev = Jev.load(Path(a.checkpoint) if a.checkpoint else None)
+    ext = a.ext or Path(a.file).suffix
+    print(json.dumps({"context": {"file": a.file, "offset": a.offset, "bytes": len(frag), "extension": ext},
+                      "choice": jev.choice(frag, [o for o in a.options.split(",") if o] or None),
+                      "yes_no": jev.yes_no(frag, ext), "score": jev.score(frag)}, indent=2))
+    return 0
+
+
+def cmd_mm(a: argparse.Namespace) -> int:
+    """Jev-MM multimodal image-triage model: dataset (build / ocr / encode), train, eval, ask."""
+    import os
+
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    from src.ml import mm_dataset as mmd
+
+    ds = Path(a.dataset) if a.dataset else None
+    ck = Path(a.checkpoint) if a.checkpoint else None
+    if a.action == "build":
+        out = mmd.build(max_per_class=a.max_files)
+        print((out / "DATASHEET.md").read_text(encoding="utf-8"))
+        return 0
+    if a.action == "ocr":
+        print(f"[mm] OCR -> {mmd.run_ocr(ds)}")
+        return 0
+    if a.action == "encode":
+        print(f"[mm] text features -> {mmd.encode_text(ds)}")
+        return 0
+    if a.action == "prepare":
+        out = mmd.build(max_per_class=a.max_files)
+        mmd.run_ocr(out)
+        mmd.encode_text(out)
+        print((out / "DATASHEET.md").read_text(encoding="utf-8"))
+        return 0
+    if a.action == "train":
+        from src.ml.mm_train import train
+
+        res = train(ds, epochs=a.epochs, batch=a.batch, lr=a.lr, seed=a.seed, ablations=not a.no_ablations,
+                    seeds=tuple(int(x) for x in a.seeds.split(",") if x.strip()) or None)
+        print((Path(res["run"]) / "REPORT.md").read_text(encoding="utf-8"))
+        print(f"[mm] checkpoint {res['checkpoint']}")
+        return 0
+    if a.action == "eval":
+        from src.ml.mm_train import evaluate
+
+        print(json.dumps(evaluate(ck, ds), indent=2))
+        return 0
+    from src.ml.multimodal import JevMM
+
+    if not a.file:
+        raise SystemExit("mm ask needs --file IMAGE[,IMAGE...]")
+    print(json.dumps(JevMM.load(ck).ask([f for f in a.file.split(",") if f], ocr=not a.no_ocr), indent=2,
+                     ensure_ascii=False))
+    return 0
+
+
+def cmd_planner(a: argparse.Namespace) -> int:
+    """Investigation planner (deep learning): learns from solved cases where to look in a new one."""
+    import os
+
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    from src.ml import planner_dataset as pd_
+
+    ds = Path(a.dataset) if a.dataset else None
+    if a.action == "build":
+        out = pd_.build()
+        pd_.encode(out)
+        print((out / "build.json").read_text(encoding="utf-8")[:3000])
+        return 0
+    if a.action == "encode":
+        print(f"[planner] text features -> {pd_.encode(ds)}")
+        return 0
+    if a.action == "pretrain-build":
+        from src.ml.planner_pretrain import build as pre_build
+
+        print((pre_build() / "build.json").read_text(encoding="utf-8")[:2000])
+        return 0
+    if a.action == "pretrain":
+        from src.ml.planner_pretrain import pretrain
+
+        res = pretrain(ds, epochs=a.epochs if a.epochs != 10 else 20, seed=a.seed)
+        print((Path(res["run"]) / "REPORT.md").read_text(encoding="utf-8"))
+        return 0
+    if a.action == "train":
+        from src.ml.planner_train import train
+
+        res = train(ds, epochs=a.epochs, seed=a.seed, ablations=not a.no_ablations)
+        print((Path(res["run"]) / "REPORT.md").read_text(encoding="utf-8"))
+        return 0
+    from src.cases.registry import CASES
+    from src.pipeline.solve import plan, planner_for
+
+    if a.case not in CASES:
+        raise SystemExit("planner ask needs --case <id>")
+    pl, ck = planner_for(a.case, Path(a.checkpoint) if a.checkpoint else None)
+    rows, p, _ = plan(CASES[a.case], pl)
+    for rank, i in enumerate(sorted(range(len(rows)), key=lambda j: -p[j])[:a.k], 1):
+        print(f"{rank:4d}  p={p[i]:.3f}  {rows[i]['category']:<16} {rows[i]['name'][-100:]}")
+    print(f"[planner] {ck}")
+    return 0
+
+
+def cmd_solve(a: argparse.Namespace) -> int:
+    """Deep-learning investigation: planner -> image / reader agents -> verifier -> report."""
+    from src.pipeline.solve import solve
+
+    cases = [c.strip() for c in a.case.split(",") if c.strip()]
+    out = [solve(c, k=a.k, checkpoint=Path(a.checkpoint) if a.checkpoint else None, vlm=a.vlm) for c in cases]
+    print(json.dumps(out, indent=1, default=str)[:6000])
+    return 0
+
+
 def cmd_schemas(a: argparse.Namespace) -> int:
     from src.schemas import BridgeRecord, TrainingSample
     from src.verification.models import Finding
@@ -332,8 +485,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ForensiAgent-Multimodal")
     ap.add_argument("--source", "--evidence", dest="source", default="android_10", choices=_all_evidence_ids())
     sub = ap.add_subparsers(dest="cmd", required=True)
-    pc = sub.add_parser("cases", help="case database: list | build | catalog")
-    pc.add_argument("action", choices=("list", "build", "catalog"))
+    pc = sub.add_parser("cases", help="case database: list | build | catalog | audit | repair")
+    pc.add_argument("action", choices=("list", "build", "catalog", "audit", "repair"))
+    pc.add_argument("--no-hash", action="store_true", help="audit: existence and size only (fast)")
+    pc.add_argument("--dry-run", action="store_true", help="repair: re-acquire and check, write nothing")
     pc.add_argument("--cases", default="all", help="all | comma-separated case ids")
     pc.add_argument("--groups", default="light", help="evidence groups to fetch: light,heavy,extended")
     pc.add_argument("--only", default="", help="comma-separated evidence ids (overrides --groups)")
@@ -347,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     pi.add_argument("--no-vlm", action="store_true")
     pi.add_argument("--no-ocr", action="store_true")
     pi.add_argument("--run-id", default="")
-    pi.add_argument("--agents", default="", help="apps,fs,win: run the deterministic agents instead of vision")
+    pi.add_argument("--agents", default="", help="apps,fs,win,jev,mm: run these agents instead of vision")
     pi.add_argument("--no-carve", action="store_true")
     pi.set_defaults(fn=lambda a: cmd_agents(a) if a.agents else cmd_investigate(a))
     for name, helptext in (("apps", "AppArtifactAgent: SMS, calls, contacts, chats, browser history (verified rows)"),
@@ -376,6 +531,52 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--dataset", default="", help="data/datasets/<date> (default: latest)")
     pf.add_argument("--validate", default="", help="validate a TrainingSample JSONL file and exit")
     pf.set_defaults(fn=cmd_finetune)
+    pj = sub.add_parser("jev", help="Jev typed-answer model (deep learning): build | train | eval | ask")
+    pj.add_argument("action", choices=("build", "train", "eval", "ask"))
+    pj.add_argument("--dataset", default="", help="data/datasets/fragments/<date> (default: latest)")
+    pj.add_argument("--checkpoint", default="", help="default: data/models/jev/jev.pt")
+    pj.add_argument("--epochs", type=int, default=20)
+    pj.add_argument("--batch", type=int, default=512)
+    pj.add_argument("--lr", type=float, default=2e-3)
+    pj.add_argument("--seed", type=int, default=13)
+    pj.add_argument("--max-files", type=int, default=400, help="build: files per case and type")
+    pj.add_argument("--file", default="", help="ask: any file to read one fragment from")
+    pj.add_argument("--offset", type=int, default=512, help="ask: byte offset of the 512-byte fragment")
+    pj.add_argument("--ext", default="", help="ask: extension to judge (default: the file's own)")
+    pj.add_argument("--options", default="", help="ask: comma-separated subset of types for the choice query")
+    pj.set_defaults(fn=cmd_jev)
+    pm = sub.add_parser("mm", help="Jev-MM multimodal model (vision + metadata + OCR text): "
+                                   "build | ocr | encode | prepare | train | eval | ask")
+    pm.add_argument("action", choices=("build", "ocr", "encode", "prepare", "train", "eval", "ask"))
+    pm.add_argument("--dataset", default="", help="data/datasets/multimodal/<date> (default: latest)")
+    pm.add_argument("--checkpoint", default="", help="default: data/models/multimodal/jev_mm.pt")
+    pm.add_argument("--epochs", type=int, default=12)
+    pm.add_argument("--batch", type=int, default=128)
+    pm.add_argument("--lr", type=float, default=1e-3)
+    pm.add_argument("--seed", type=int, default=13)
+    pm.add_argument("--max-files", type=int, default=400, help="build: images per case and origin")
+    pm.add_argument("--no-ablations", action="store_true", help="train: full model only")
+    pm.add_argument("--seeds", default="13,14,15", help="train: comma-separated seeds (mean +- std in the report)")
+    pm.add_argument("--file", default="", help="ask: image file(s), comma-separated")
+    pm.add_argument("--no-ocr", action="store_true", help="ask: skip OCR (text modality absent)")
+    pm.set_defaults(fn=cmd_mm)
+    pp = sub.add_parser("planner", help="investigation planner (deep learning): build | encode | pretrain-build | "
+                                        "pretrain | train | ask")
+    pp.add_argument("action", choices=("build", "encode", "pretrain-build", "pretrain", "train", "ask"))
+    pp.add_argument("--dataset", default="", help="data/datasets/planner/<date> (default: latest)")
+    pp.add_argument("--checkpoint", default="", help="default: the case's leave-one-out model, else planner.pt")
+    pp.add_argument("--epochs", type=int, default=10)
+    pp.add_argument("--seed", type=int, default=13)
+    pp.add_argument("--no-ablations", action="store_true")
+    pp.add_argument("--case", default="", help="ask: case to rank")
+    pp.add_argument("--k", type=int, default=30, help="ask: how many files to list")
+    pp.set_defaults(fn=cmd_planner)
+    ps = sub.add_parser("solve", help="deep-learning investigation of a case: planner -> agents -> verifier")
+    ps.add_argument("--case", required=True, help="case id (comma-separated for several)")
+    ps.add_argument("--k", type=int, default=100, help="files dispatched from the planner's ranking")
+    ps.add_argument("--checkpoint", default="")
+    ps.add_argument("--vlm", action="store_true", help="also run the Qwen2.5-VL vision agent on dispatched images")
+    ps.set_defaults(fn=cmd_solve)
     sub.add_parser("schemas", help="write FDX JSON Schemas to docs/schemas/").set_defaults(fn=cmd_schemas)
     pg = sub.add_parser("gui", help="local web interface (http://127.0.0.1:8765)")
     pg.add_argument("--port", type=int, default=8765)

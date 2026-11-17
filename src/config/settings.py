@@ -46,6 +46,10 @@ DATA_DIR: Path = (Path(os.environ["FORENSI_DATA_DIR"]).resolve() if os.environ.g
                   else PROJECT_ROOT / "data")
 RAW_IMAGES_DIR: Path = DATA_DIR / "raw_images"
 OUTPUTS_DIR: Path = DATA_DIR / "outputs"
+# Large, regenerable ML tensors (image thumbnails for the multimodal model). Kept out of the synced project folder
+# by default; override with FORENSI_CACHE_DIR.
+CACHE_DIR: Path = (Path(os.environ["FORENSI_CACHE_DIR"]).resolve() if os.environ.get("FORENSI_CACHE_DIR")
+                   else Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "ForensiAgent" / "cache")
 
 
 @dataclass(frozen=True)

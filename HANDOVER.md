@@ -1,7 +1,175 @@
 # HANDOVER: ForensiAgent-Multimodal
 
-_Last updated: 2026-10-08, Sprint 2.5 (WindowsArtifactAgent, verifier hardening, scoring against answer keys).
+_Last updated: 2026-11-16 (deep-learning focus: Jev-MM multimodal model, investigation planner + self-supervised encoders, DL pipeline, evidence repair).
 Read §0 first, then §1c / §1d. README.md is the full, peer-facing project report (results, metrics, limitations)._
+
+## 00. 2026-11-15 HANDOFF (read first): deep-learning focus, multimodal models, evidence repair
+
+**What the user asked (2026-11-15):** "finish the project, strictly the deep-learning part, with the multimodal
+requirement ready; check for data losses and fix everything". Then: "multimodality is non-negotiable"; "you can
+eliminate the deterministic agents, keep the hallucination filters / safeguards; gather the solutions of the cases
+and train a model that learns where to look, what to investigate and what to give to the other agents; only the
+necessary agents"; "this is a Deep Learning course project, not a forensics course". → The deliverable is the DL
+methodology; forensics is the application domain. Deterministic agents (apps / fs / win) stay in the repo but are
+**not** part of the DL pipeline (do not delete them unless the user says so).
+
+### Done this session
+1. **Jev-MM multimodal image model** (vision CLIP ViT-B/32 + 43 metadata features + OCR text → fusion transformer;
+   `src/ml/mm_dataset.py`, `multimodal.py`, `mm_train.py`; agent `src/agents/mm_agent.py`, `--agents mm`; CLI
+   `python main.py mm build|ocr|encode|prepare|train|eval|ask`). Dataset 12,532 images / 57 cases
+   (`data/datasets/multimodal/20261115`, thumbnails in `%LOCALAPPDATA%/ForensiAgent/cache`). Test (3 seeds):
+   all modalities **0.744 ± 0.015 acc / 0.533 ± 0.015 macro-F1** vs vision 0.662, metadata 0.655, text 0.502,
+   majority 0.450. Report `data/outputs/ml/multimodal/20261115_191432/REPORT.md`; checkpoint
+   `data/models/multimodal/jev_mm.pt`. README §6.6. Hyper-parameters chosen on validation only (1 ViT block, lr 1e-5).
+2. **Data loss audit + repair** (`src/utils/integrity.py`, `python main.py cases audit|repair`). Full SHA-256 audit
+   of 162,793 evidence files found 51 damaged: 29 `Recent/desktop.ini` rewritten by Windows, 17 `-shm` rewritten
+   (hickman_android_10), 5 missing. Repair re-reads the original image by range requests and writes only on SHA-256
+   match; at-risk files are set read-only. **Result: 39 / 51 restored (SHA-256 match), 22,395 at-risk files made
+   read-only; 12 not restorable by range reads** (11 `desktop.ini` in narcos 1-3, magnet 2020 / 2022, ahadi 02 / 03 /
+   05, dfirmadness + `Windows PowerShell.evtx` in dfirmadness: images deflated / 7z-packed at the source → need a
+   full re-download). Details: `data/outputs/integrity/repair_20261115_200729.json`; log
+   `data/outputs/integrity_repair.log`. Restoring a read-only file: `integrity._write_evidence` clears the flag.
+3. **Jev byte model data loss fixed**: `fragments.py` silently skipped 6,036 files with paths ≥ 260 chars; rebuilt
+   (`data/datasets/fragments/20261115`) and retrained: 0.811 acc / 0.658 macro-F1.
+4. `fit_temperature` clamped to [0.05, 20] (perfectly separable validation gave T = 0 → division by zero).
+5. Tests: `tests/test_multimodal.py` (20), `tests/test_integrity.py` (3), `tests/test_planner.py` (6); full suite 212 pass.
+6. Course report source updated: `../dl-report-ep-corrected.tex` (Jev-MM method + results table; no LaTeX on this
+   machine, compile on Overleaf).
+
+### Investigation PLANNER + deep-learning pipeline (done 2026-11-15; README §6.7)
+* Dataset `data/datasets/planner/20261115`: 28,523 files / 14 solved cases / 802 relevant (labels: file named by the
+  answer key OR its bytes contain a key identifier; Aho-Corasick scan). Inputs: path, 256 header bytes, metadata,
+  content strings (MPNet), brief (MPNet). Shared feature code `planner_dataset.case_rows()` (train = inference).
+* `src/ml/planner.py` (PlannerNet: char-CNN, byte-CNN, MLPs, fusion transformer, optional per-modality aux heads),
+  `src/ml/planner_train.py` (leave-one-case-out; inner validation = one other case with >= 10 relevant files; model
+  selection by mean inner-validation AP; `rereport(run)`). Run `data/outputs/ml/planner/20261115_202510/REPORT.md`.
+  Fold models `data/models/planner/loco/<case>.pt` (selected variant), all-case model `data/models/planner/planner.pt`.
+* Results (10 rankable held-out cases): deployed "4 modalities, no context" coverage@50 0.547 / AP 0.219 vs random
+  0.042 / 0.039, category prior 0.535 / 0.269, **metadata-only network 0.659 / 0.350 (best)**, logistic regression
+  0.662 / 0.322. Honest finding: fusion does not beat metadata here (13 training cases per fold → modality
+  imbalance / overfitting; aux heads raised AUROC 0.75 but not AP). Contrast with Jev-MM where fusion wins.
+* Pipeline: `python main.py solve --case X [--k 100] [--vlm]` → planner → `ReaderAgent` (`src/agents/reader_agent.py`:
+  `reader.file` + `reader.email` / `reader.url`, byte-offset citations) and `ImageTriageAgent` (Jev-MM) [+ VLM] →
+  verifier → `workspace/reports/<run>_solve.md`. End-to-end evaluation `python -m src.eval.solve_eval --k 100` →
+  `data/outputs/ml/planner/solve_eval_k100_*.md` (answer-key identifiers recovered by VERIFIED findings vs the old
+  deterministic agents that read every file).
+  **Result (K=100, LOCO planners):** 126 / 869 key identifiers (14.5 %) vs deterministic agents 137 / 869 (15.8 %)
+  reading every file; 8 / 14 cases with a hit (vs 4); ~8,200 VERIFIED, 0 REJECTED.
+* Course report `../dl-report-ep-corrected.tex`: Jev-MM + planner sections, tables, limitations (integrity numbers),
+  new refs (CLIP, SBERT, Guo 2017, Wang 2020). Not compiled (no LaTeX here): compile on Overleaf.
+
+### 2026-11-16 (done): more labelled cases, metadata-anchored fusion, deterministic training (README §6.7, tex updated)
+* **Hand-transcribed labels** `src/eval/planner_tokens.json` (solution tokens per case, with sources);
+  `planner_dataset.curated_tokens()` adds them as `token` entities in `solved_cases()`. Result: **mvs_2024 (42
+  relevant)** and **ngdc_2012 (5)** become labelled → 16 cases, 33,047 files, 849 relevant
+  (`data/datasets/planner/20261116`; the previous dataset was renamed `20261115_v1`, which the 2026-11-15 reports
+  cite). Drone GPS tokens (VTO Ryze / Yuneec / Parrot) matched nothing (binary flight logs). Curated cases are
+  excluded from SSL pretraining (`unlabelled_cases()`); the encoders did not need retraining (both cases already had
+  key text, so they were never in the pretraining set).
+* **Anchored fusion** (`PlannerConfig.anchor`): logit = metadata head + g · fused head, g init 0, aux BCE on the
+  metadata head → fusion starts as the metadata model and can only add corrections. Variants `anchored`,
+  `anchored + SSL frozen` (in CANDIDATES and in `planner_seeds.VARIANTS`).
+* **Determinism:** `planner_train.deterministic()` + `CUBLAS_WORKSPACE_CONFIG` → identical predictions on rerun
+  (checked: max diff 0.0).
+* **Results (16 cases, 3 seeds; `data/outputs/ml/planner/seeds_*` latest, LOCO run `20261116_012239`):** anchored
+  fusion AP **0.279 ± 0.026**, cov@10 0.433, cov@50 0.632 vs plain fusion 0.194 / 0.323 / 0.517, metadata-only
+  network 0.240 / 0.366 / 0.653, SSL-frozen fusion 0.218 / 0.378 / 0.588; logistic regression on metadata 0.301 /
+  0.440 / 0.708 (still marginally best, within 1 std). Anchored + SSL frozen adds nothing (0.219). **Deployed:
+  `anchored`** (inner-val AP 0.313) → `planner.pt` + `loco/<case>.pt`.
+* End to end K=100, anchored folds, 16 cases: **138 / 869** (same total as SSL folds; per case differs), 7 / 16 cases
+  with a hit, 9,353 VERIFIED, 0 REJECTED (`solve_eval_k100_20261116_044831.md`). mvs_2024 / ngdc_2012 have no
+  automatic key identifiers, so this metric ignores them.
+* Tests 217 pass. The token file lives in `src/eval/` (not `gold/`: `test_gold_files_are_well_formed` globs gold).
+
+### Self-supervised planner encoders (done 2026-11-15/16; README §6.7, course report updated)
+* `src/ml/planner_pretrain.py`: unlabelled dataset from the **50 READY cases without an answer key** (labelled cases
+  excluded entirely; 80,126 files after SHA-256 dedupe; `data/datasets/planner_pretrain/20261115`), cross-modal
+  InfoNCE between path / header / metadata / content encoders (same arch as `PlannerNet.enc`). CLI
+  `python main.py planner pretrain-build | pretrain` → `data/models/planner/pretrained_encoders.pt`
+  (report `data/outputs/ml/planner_pretrain/20261115_230146/REPORT.md`; held-out retrieval@1 0.10-0.35, chance 0.002).
+* `planner_train.py`: variants `all - context + SSL` (encoders at 0.1 × lr), `… + SSL frozen`, `metadata + SSL`
+  (skipped automatically when the encoder checkpoint is missing). LOCO run `data/outputs/ml/planner/20261115_230158`
+  deployed **`all - context + SSL frozen`** (inner-val AP 0.349); `data/models/planner/loco/<case>.pt` + `planner.pt`
+  are now that variant. `planner_dataset.scan_file` reads only 64 KB when no labels are needed.
+* **GPU non-determinism:** the same seed gave coverage@50 0.547 vs 0.442 for one variant → compare over seeds.
+  `python -m src.ml.planner_seeds` (3 seeds, ~1 h, saves nothing to models): frozen SSL vs no SSL AP 0.169 → 0.198,
+  cov@10 0.285 → 0.409, cov@50 0.549 → 0.577; still below metadata-only / logistic regression
+  (`data/outputs/ml/planner/seeds_20261116_005920/REPORT.md`).
+* End to end K=100 with the SSL folds: **138 / 869** (was 126) vs deterministic 137; 0 REJECTED
+  (`data/outputs/ml/planner/solve_eval_k100_20261116_010348.md`). Tests 215 pass (`tests/test_planner_pretrain.py`).
+* Nothing committed: all 2026-11-15 work is still uncommitted on branch `sprint-2`.
+
+### Next steps (by value)
+1. More labelled planner cases (now 16 of 108 registered / 72 READY). Ways to get more, in order of yield:
+   a. **Fetch the evidence of cases that already have a public key:** `msab_ctf_2026` (0 / 2 items) and `mvs_2026`
+      (0 / 3) have rich question/answer keys but are not READY: `python main.py cases build --cases <id>
+      --groups light,heavy`, check with `cases list`, then transcribe solution tokens into `src/eval/planner_tokens.json`.
+   b. **Hand-transcribe tokens for READY cases whose key text yields no labels:** `circl_wiped_disk`, `narcos`,
+      `nist_russian_tea_room`, `nitroba`, `vto_ryze_tello`, `vto_yuneec_h520`. Read `context/answer_key`, pick
+      distinctive names / file names / strings that should appear in evidence bytes (not GPS numbers: drone logs are
+      binary), add them with their source to `planner_tokens.json`, rebuild (`python main.py planner build`, then
+      `planner encode`), check the case gets >= 5 relevant files.
+   c. **Public write-ups for keyless CTFs:** Cellebrite CTF 2021-2025, Magnet CTF 2019-2022, DFRWS 2021 and the
+      Hickman phones have community solution blogs / official walkthroughs. Transcribe answer tokens (with the URL as
+      `source`) into `planner_tokens.json`; Cellebrite 2021-2025 also need their evidence fetched.
+   d. **Image-creation logs as ground truth:** Hickman / CFTT / VTO / NPS 2011 documentation lists the apps, accounts
+      and files the creators planted; those names are labels (same token mechanism). Fetch the non-READY ones
+      (`cftt_*`, `nps2011_*`, `vto_dji_*`, ...) first.
+   e. **New sources:** Digital Corpora scenarios, CFReDS, DFIR Madness, Ali Hadi's challenges and Josh Hickman's newer
+      images (Android 14 / iOS 17) publish evidence + answers; register them in `src/cases/registry.py`. Respect the
+      1.5 GB / 1,500-image per-source budget and the >= 100 READY case target.
+   Re-run `python -m src.ml.planner_seeds` after each batch: with ~13 training cases per fold, fusion is data-starved,
+   so every added labelled case is the most direct way to improve the planner.
+1b. **User request (2026-11-16): improve the planner with data augmentation / data generation, transfer learning
+   and fine-tuning** (goal: the multimodal anchored fusion, AP 0.279, should clearly beat logistic regression on
+   metadata, AP 0.301). A **draft is in the code but has NOT been run or evaluated** (smoke-tested only: forward
+   pass, Jev weight load; 217 tests pass). It lives in `src/ml/planner_train.py` and `src/ml/planner.py`:
+   * `EXPERIMENTAL` dict + `EXTRA` options (deliberately **not** in `ABLATIONS` / `CANDIDATES`, so default
+     `planner train` runs are unchanged); `train_variant(data, name, ...)` trains any variant by name.
+   * `anchored + aug`: `augment()`: path prefix crop + 3 % char substitution outside the last 24 chars (file name),
+     2 % header byte noise after the 16-byte signature, Gaussian jitter on continuous metadata columns
+     (`META_CONT`), dropout + noise on the content embedding, and **synthetic positives** (SMOTE-style
+     interpolation of metadata / content between two positives, lambda ~ U(0.5, 1)).
+   * `anchored + Jev header`: **transfer learning**: `PlannerConfig.header_jev` swaps the header encoder for
+     `JevHeader` (the trained Jev byte CNN trunk from `data/models/jev/jev.pt`, `load_jev()`), **fine-tuned** at
+     0.1 x lr. Caveat: Jev was trained on body fragments (first sector excluded), so headers are partly
+     out-of-domain; also try it frozen.
+   * `anchored + noisy student`: **self-training / data generation**: a plain anchored teacher pseudo-labels the
+     80k files of the 50 unlabelled READY cases (`Pseudo`, `pseudo_labels`, SSL dataset `PreData`; no labelled
+     case is in it, so no leakage); the student trains on labelled + soft pseudo labels (weight 0.5) with
+     augmentation. About 2x the training cost per fold.
+   **To run:** add the three names to `planner_seeds.VARIANTS` (and to `ABLATIONS` / `CANDIDATES` if one wins), then
+   `.venv/Scripts/python -m src.ml.planner_seeds --seeds 13,14,15` (~1-2 h). Compare with `anchored` and logistic
+   regression; deploy only by inner-validation AP. **Use `.venv/Scripts/python`**: the system `python` has no
+   CUDA and lacks `piexif`. Add a unit test for `augment` (shapes, file name / signature untouched, label kept).
+   Other ideas in the same line: generate synthetic labelled cases by planting key-like tokens (names, e-mails,
+   URLs) into copies of benign files of unlabelled cases (labels are then exact); mixup between cases; fine-tune
+   the MPNet content encoder (now frozen features) with LoRA; more aggressive modality dropout; an ensemble over
+   seeds (cheap, reduces the ±0.026 seed variance).
+2. Planner: anchoring works; try anchoring on the logistic-regression score itself (learned residual on top of the
+   linear model), and count curated tokens in `solve_eval` so mvs_2024 / ngdc_2012 are measured end to end.
+3. Commit: all 2026-11-15/16 work is uncommitted on `sprint-2` (ask the user first).
+4. Re-download the 12 unrestorable evidence files' images (narcos 1-3, magnet 2020 / 2022, ahadi 02 / 03 / 05,
+   dfirmadness) and run `python main.py cases repair`; move `data/` out of OneDrive (`FORENSI_DATA_DIR`).
+5. Jev-MM: messaging / screenshot classes are small; add more mobile cases or weight them.
+
+## 0a. 2026-10-24: Jev typed-answer model (deep learning, course requirement)
+
+**Asked by the user:** the project is for a Deep Learning course and must contain a model that is trained, "a Jev
+model" (a classifier that reads a context and returns typed answers with probabilities: choice / score / yes-no).
+Built in-house (no external API: evidence never leaves the machine, and the course needs our own training):
+
+* `src/ml/fragments.py`: 512-B body fragments (first sector excluded) from every READY case → `data/datasets/fragments/<date>/`
+  (140,522 fragments, 44,939 files, per-case splits).
+* `src/ml/jev.py`: 0.89 M-param byte CNN, heads choice (17 types) / yes_no (disguised) / score (position); `Jev` query API.
+* `src/ml/train.py`: training, temperature calibration, baselines, `REPORT.md`; checkpoint `data/models/jev/jev.pt`.
+* `src/agents/jev_agent.py`: leads for headerless files, always UNCORROBORATED (no citations). `--agents jev`.
+* Test cases: choice 0.805 acc / 0.677 macro-F1 (histogram baseline 0.650 / 0.480); yes_no AUROC 0.985 on re-drawn
+  extensions but **0.78 on real ones (precision ≈ 5 %)**; score MAE 0.227 vs 0.243 constant. README §6.5.
+* An early version of the yes_no augmentation let the extension alone reach 0.97 AUROC (shortcut); fixed with a shared
+  extension pool. The extension-only baseline stays in the report as the check.
+* Next: more mp4 / zip / pdf / elf support in the val/test cases; train on sliding windows for carving; a stronger
+  disguise signal (several fragments per file in the head, not their mean).
 
 ## 0. Sprint 2.5 (2026-10-08): what changed, results, how to resume
 
@@ -28,7 +196,7 @@ Read §0 first, then §1c / §1d. README.md is the full, peer-facing project rep
 * Gold: NIST Data Leakage **23 / 38 answered (60.5 %)**, mean credit 64.8 % (23 / 30 = 76.7 % within built
   capabilities); NIST Hacking Case **11 / 23 (47.8 %)**. Per question: `data/cases/<case>/workspace/reports/score.md`.
 * Answer-key entity recall: 137 / 907 pooled over 19 cases (15.1 %); Data Leakage 37.2 %.
-* M57 has **no** gold set: `m57-instructor-packet.pdf` is password-protected; the other M57 key decks have no answers.
+* M57 has **no** gold set: its public key decks have no answers.
 * Tests: 176 pass.
 
 **Gold files** are transcribed by hand from the answer-key PDFs (questions, answers, requirement groups;
@@ -207,9 +375,9 @@ data/cases/
 
 | Case | Evidence (computer ● / mobile ○) | Brief | Answer key |
 |---|---|---|---|
-| `m57_patents` | ● Charlie, Jo, Pat, Terry workstations (XP); ● 4 USB drives | affidavit + 4 detective reports | instructor packet + 3 scenario decks |
-| `lone_wolf` | ● suspect laptop (Win10, 9×E01) | README | forensic reports bundle (teacher guide is password-protected) |
-| `narcos` | ● 3 PCs (split raw, heavy) + ● post-CCleaner PC | — | teacher guide **password-protected** (see RESTRICTED note) |
+| `m57_patents` | ● Charlie, Jo, Pat, Terry workstations (XP); ● 4 USB drives | affidavit + 4 detective reports | 3 scenario decks |
+| `lone_wolf` | ● suspect laptop (Win10, 9×E01) | README | forensic reports bundle |
+| `narcos` | ● 3 PCs (split raw, heavy) + ● post-CCleaner PC | — | — |
 | `nist_data_leakage` | ● PC (Win7), ● USB #1, ● USB #2, ● CD-R | NIST case page | `leakage-answers.pdf` |
 | `owl` | ● HD1 desktop (68 GB, range-read), ○ Nexus 5 quick image | — | 4 creation logs |
 | `dfrws2021` | ● skimmer microSD, ● Raspberry Pi microSD (heavy), ○ Galaxy S10 | README + challenge details | — |
@@ -247,7 +415,6 @@ OCR/VLM text is now corroborated against **SQLite cells and lines of plain-text 
 
 ### Known gaps
 * NIST CD-R (`nist_rm3`): pure UDF 2.x (NSR03, no ISO-9660 bridge); TSK cannot read it → group `future`, needs a UDF reader.
-* Lone Wolf / Narcos teacher guides are password-protected (instructor request to Digital Corpora).
 * macOS (Tuck, Magnet 2021 MacBook, APFS), Magnet 2022 Linux (.7z), QNAP NAS (RAID) and memory images are not
   registered/fetched yet.
 * Document text inside DOCX/PDF evidence is not yet indexed for corroboration (plain text only).

@@ -24,6 +24,7 @@ data/datasets/
 data/raw_images/
 data/outputs/
 data/_spool/
+data/models/
 *.sqlite
 *.sqlite-journal
 *.db

@@ -1,0 +1,23 @@
+{
+ "_doc": "Hand-transcribed planner labels (supervision only, never an agent input). For cases whose answer key is a narrative or a salted-data list, the automatic identifier extractor (e-mail / URL / domain / phone / file name) finds nothing usable. Each token is a distinctive string taken from the publisher's solution or salted-data section; a file of the case whose first 64 MB contain a token (UTF-8 or UTF-16LE, case-insensitive) is labelled relevant. Keys behind instructor passwords (M57-Jean, Nitroba, NGDC evidence reports, Hickman Android 6, M57 instructor packet) were NOT opened.",
+ "mvs_2024": {
+  "source": "context/answer_key/publisher_solution_notes.md + publisher scenario (Hexordia MVS 2024): Chadwick (Chad) Elms and Rocco Sachs meet on X, play Call of Duty, discuss 'vitamins', meet at Burlington City Hall park and Ethan Allen Park; AirTag placed on Rocco",
+  "tokens": ["chadwick", "chad elms", "rocco sachs", "vitamins", "ethan allen", "city hall park", "airtag"]
+ },
+ "ngdc_2012": {
+  "source": "context/answer_key (Digital Corpora scenario story): Carry uses the catsumtwelve e-mail account with Alex; Krasnovia / Majavia defacement plot; Tracy-Carry 'flash mob' pretext; Tracy and Pat plan to steal stamps; Joe's keylogger on the MacBook Air; steganography",
+  "tokens": ["catsumtwelve", "krasnovia", "majavia", "flash mob", "flashmob", "keylogger", "steganograph"]
+ },
+ "vto_ryze_tello": {
+  "source": "VTO drone report v1.0, section 7 'Salted Data': GPS boundary points of the salted flight",
+  "tokens": ["39.965545", "39.959745", "39.961579", "39.957534", "-106.217218", "-106.213494", "-106.223373", "-106.221186", "39.9655", "39.9597", "39.9615", "39.9575"]
+ },
+ "vto_yuneec_h520": {
+  "source": "VTO drone report v1.0, section 5 'Salted Data': GPS boundary points of the salted flight",
+  "tokens": ["39.965545", "39.959745", "39.961579", "39.957534", "-106.217218", "-106.213494", "-106.223373", "-106.221186", "39.9655", "39.9597", "39.9615", "39.9575"]
+ },
+ "vto_parrot_bluegrass": {
+  "source": "VTO drone report v1.0, section 7 'Salted Data': GPS boundary points of the salted flight",
+  "tokens": ["39.846288", "39.845602", "-105.219100", "-105.212419", "39.8462", "39.8456", "-105.2191", "-105.2124"]
+ }
+}
