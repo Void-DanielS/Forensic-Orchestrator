@@ -50,3 +50,6 @@ desktop.ini
 
 # Bundled third-party binaries (install per tools/README.md)
 tools/7zip/
+
+# public write-ups cloned for the fine-tuning corpus (untrusted data, not ours)
+data/external/

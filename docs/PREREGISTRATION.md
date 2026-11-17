@@ -85,7 +85,9 @@ with knowledge of them; this is stated in the paper.
     (the rest). No other annotation, no hand-built features.
   * **Exclusion (no leakage):** a write-up is dropped if its path, title or text names any of the 16 dataset cases
     (alias list in `src/ml/writeups.py`), or if it contains any answer-key identifier of the 16 cases. The list and
-    the filter are fixed before training.
+    the filter are fixed before training. (Clarified before the filter was first run: matching is a
+    case-insensitive substring test; the identifiers shorter than 4 characters, 3 of 504, are not used because
+    they match almost any text.)
   * **Fine-tuning:** LoRA on the same Qwen2.5-VL-3B language model used for the zero-shot prior; causal-LM loss on
     the solution tokens given the context. Fixed recipe, no search: r = 16, alpha = 32, dropout 0.05, all
     attention and MLP projections of the language model, learning rate 1e-4, 1 epoch, max 1,024 tokens, seed 0. No
