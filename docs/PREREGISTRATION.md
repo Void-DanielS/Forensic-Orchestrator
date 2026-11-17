@@ -1,0 +1,81 @@
+# Pre-registration: planner vs logistic regression, and the orchestrated agents
+
+Fixed on 2026-11-17, **before** any of the numbers it describes were computed. The code is in
+`src/ml/planner_protocol.py` (definitions, criteria, bootstrap). Any later change is listed under *Deviations* with
+its date and reason; the original text is not edited.
+
+## Context (known before this protocol)
+
+Earlier exploratory runs compared many planner variants on the held-out cases themselves (best seed ensemble AP
+0.323 vs logistic regression 0.301; standard error across cases about 0.075). Those numbers are exploratory: the
+variants were looked at on held-out cases, so they cannot support a claim. The candidate list below was drawn up
+with knowledge of them; this is stated in the paper.
+
+## 1. Planner: primary comparison
+
+* **Data:** planner dataset `data/datasets/planner/20261116` (16 solved cases, 33,047 files, 849 relevant).
+* **Labels (primary):** unchanged: a file is relevant when the answer key names it or its bytes contain an
+  answer-key identifier.
+* **Held-out cases:** leave-one-case-out; metrics are computed on the 13 *rankable* held-out cases (≥ 50 files, not
+  every file relevant), each case counting once.
+* **Primary metric:** average precision (AP) per held-out case. Secondary, reported but not used for the decision:
+  AUROC, coverage@10/50/100.
+* **Baseline:** L2 logistic regression on the metadata vector, case-balanced weights, fitted on the 15 non-held-out
+  cases (`planner_train.fit_logreg`), unchanged.
+* **The one final model** (nested selection, nothing chosen on the held-out case):
+  1. For held-out case *t*, the training pool is the other 15 cases. Inner-validation cases are the pool cases with
+     ≥ 10 relevant files.
+  2. Each candidate in `CANDIDATES` (`metadata`, `anchored`, `wide & deep`, `wide & deep + aug`; plus
+     `wide & deep + LLM prior` if the zero-shot prior has been computed with its single fixed prompt) is trained once
+     per inner-validation case *v* (trained on pool − *v*) and per seed (13, 14, 15), 10 epochs. In
+     `wide & deep` the frozen logistic-regression part is fitted on pool − *v* only (the inner-validation case is
+     never inside it).
+  3. The (variant, epoch) with the highest mean inner-validation AP over all inner folds and seeds is chosen. Epoch 0
+     exists only for wide & deep variants (where it is logistic regression on pool − *v*).
+  4. The final model of fold *t* is the mean logit of all its inner models (inner folds × seeds) at the chosen epoch.
+* **Decision: "clearly beats logistic regression"** requires all three, on the 13 rankable cases:
+  1. mean AP gain (final − LR) ≥ **0.05**;
+  2. paired bootstrap over cases (10,000 resamples, seed 0): lower bound of the 95 % percentile CI of the mean gain
+     **> 0**;
+  3. AP(final) > AP(LR) on **≥ 9 of 13** cases (ties are not wins).
+
+  Only the final model is tested. Per-variant numbers are reported as descriptive, never as the claim.
+
+## 2. Planner: secondary metric "user-level files only"
+
+* **Definition** (`planner_protocol.is_container`, decided before any number): the held-out case's files are
+  restricted to non-container files. Container files are those in the categories `fs_metadata`, `memory_image` or
+  `network_capture`. Also excluded are NTFS/FAT/exFAT metafiles (`$MFT`, `$LogFile`, `$Boot`, `$FAT1`, ...; but not
+  the recycle-bin `$I`/`$R` files), `pagefile.sys` / `hiberfil.sys` / `swapfile.sys`, raw images and captures
+  (`.raw .dd .img .dmp .vmem .mem .e01 .vhd .vhdx .vmdk .pcap .pcapng`), NAND dumps `mtd*.bin`, and paths with a
+  component starting with `unalloc` or `slack`.
+* The models are **not** retrained: the same scores are evaluated on the subset. Rankability uses the same rule on
+  the subset.
+* It is reported **next to** the primary metric, with the same three statistics, and is **not** used for the claim.
+* The paper states openly that the primary labels favour logistic regression, because container files and large
+  databases contain answer-key bytes almost everywhere.
+* Known before computing any metric (count only, no labels read): only 123 of 33,047 files are container files under
+  this definition; the dataset has no pagefile or unallocated files.
+
+## 3. Orchestrated agents (end-to-end)
+
+* Run only after the planner is frozen (the final model above, LOCO folds). The GPU is not used by anything else
+  during the run.
+* **Cases:** the solved cases that have automatic answer-key identifiers. `mvs_2024` and `ngdc_2012` are excluded
+  (none), and the paper says so.
+* **Metric:** answer-key identifiers present in VERIFIED findings, split by source:
+  * LLM quotes (`analyst.<type>`);
+  * the deterministic extraction tool (`analyst.tool.*`);
+  * image agent;
+  * union.
+* **Systems**, all with the same K:
+  * **full:** planner ranking, rounds with feedback, analyst with the tool;
+  * **no feedback:** planner ranking chosen once;
+  * **no tool:** full system with the extraction tool disabled;
+  * **LR control:** top-K by logistic regression, same agents, no feedback.
+* **K:** start at 100. If timing one case on a free GPU shows the full run cannot finish overnight, K is reduced
+  using that timing **only**, before any results are compared, and the reduction is recorded here.
+
+## Deviations
+
+(none yet)
