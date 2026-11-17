@@ -64,9 +64,9 @@ before any held-out number was read):**
 - **Corpus:** `src/ml/writeups.py`. It reads the shallow clones in `data/external/writeups/` (git-ignored, untrusted
   data, never executed; one cloned repo ships a CLAUDE.md, which is just data) and writes
   `data/datasets/writeups/pairs.jsonl`:
-  - 274 pairs (ChickenLoner Write_It_UP, Panagiotis-INS Cyber-Defenders, Baniur, dbissell6 DFIR, isaac-do,
+  - 284 pairs (cleaned so the examiner's actions dominate: Question -> steps -> Answer; ChickenLoner Write_It_UP, Panagiotis-INS Cyber-Defenders, Baniur, dbissell6 DFIR, isaac-do,
     mikehorn-git, stark4n6);
-  - leak filter: none named a dataset case; 75 were dropped because they contain an answer-key identifier.
+  - leak filter (on the raw page): none named a dataset case; 108 were dropped because they contain an answer-key identifier; 5 non-English dropped.
 - **Fine-tune:** `src/ml/finetune_prior.py`.
   - LoRA with the fixed recipe, about 260k training tokens (67 % of the examples are cut at 1,024 tokens).
   - The adapter goes to `data/models/llm_prior_lora/`, and `training.json` records the held-out loss before and

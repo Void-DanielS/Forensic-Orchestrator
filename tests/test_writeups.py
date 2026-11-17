@@ -13,12 +13,27 @@ def test_split_and_clean():
     text = w.clean(f"# Lab\n![x](a.png)\n{SCENARIO}\n{SOLUTION}")
     ctx, sol = w.split(text)
     assert "phishing" in ctx and "png" not in ctx
-    assert sol.startswith("## Questions") and "MFTECmd" in sol
+    assert sol.startswith("Question: What file was opened?\nParsing the MFT with MFTECmd")
+    assert "Answer: invoice.docm" in sol and "## Questions" not in sol and "   Answer" not in sol
 
 
 def test_split_on_task_lines():
     ctx, sol = w.split(f"{SCENARIO}\n>Task 1: Which IP brute-forced SSH?\n" + "auth.log shows it. " * 40)
-    assert sol.startswith(">Task 1")
+    assert sol.startswith("Question: Which IP brute-forced SSH?\nauth.log")
+
+
+def test_structure_keeps_actions_drops_noise():
+    sol = ("## Walkthrough\nI start by mounting the image with Arsenal Image Mounter and parsing it with KAPE.\n\n"
+           "> Q1: Which user?\nOpen NTUSER.DAT in Registry Explorer and go to the RecentDocs key.\n\n   Answer\n  bob\n\n"
+           "> Q2: First flag?\n\n   Answer\n  FLAG{x}\n\n"
+           "> Q3: Hash?\n```\n" + "\n".join(f"line {i}" for i in range(30)) + "\n```\nI ran md5sum on it.\n"
+           "**Answer:** abc\n\n## Summary\nThanks for reading, follow me!\n")
+    out = w.structure(w.clean(sol))
+    assert out.startswith("Approach:\nI start by mounting the image")
+    assert "Question: Which user?\nOpen NTUSER.DAT in Registry Explorer" in out and "Answer: bob" in out
+    assert "First flag" not in out                       # answered without any step
+    assert "line 7" in out and "line 8" not in out       # long tool output cut after 8 lines
+    assert "Answer: abc" in out and "Thanks for reading" not in out
 
 
 def test_leak_filter(tmp_path, monkeypatch):

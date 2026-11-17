@@ -104,3 +104,14 @@ with knowledge of them; this is stated in the paper.
 * 2026-11-17: K for section 3. One case (nist_data_leakage, full system) took 337 s on a free GPU (about 3.4 s per
   file), so 14 cases × 4 systems take at most about 5 h. **K = 100 is kept.** The decision was made from the timing
   only; no system comparison existed.
+* 2026-11-17, before any fine-tuning (at the user's request): **cleaning of the write-up text** so the examiner's
+  actions dominate the solution.
+  * The solution is laid out as `Approach` / (`Question` → the examiner's own steps → `Answer`).
+  * Removed:
+    * questions answered without any step;
+    * page metadata, links, images, separators, emoji and trailing summary / reference sections;
+    * pasted tool output beyond the first 8 lines of a code block.
+  * Non-English write-ups (> 5 % non-ASCII letters) are dropped.
+  * The leak filter is applied to the raw page, before cleaning, so it is stricter.
+  * Result: 284 pairs (108 dropped by the identifier filter, 0 naming a case); 73 % of solution tokens fit in
+    1,024 tokens.
