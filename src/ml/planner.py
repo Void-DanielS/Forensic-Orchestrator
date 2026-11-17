@@ -51,6 +51,7 @@ class PlannerConfig:
     aux_heads: bool = False          # one auxiliary head per modality (gradient-blending-style supervision)
     anchor: bool = False             # metadata-anchored residual fusion (see module doc)
     header_jev: bool = False         # transfer learning: header encoder = the Jev byte CNN (src/ml/jev.py) + projection
+    wide: bool = False               # wide & deep: linear metadata model (init. from logistic regression) + g * fusion
     modality_dropout: float = 0.15
     n_meta: int = N_META
     temperature: float = 1.0
@@ -125,7 +126,10 @@ class PlannerNet(nn.Module):
         self.norm = nn.LayerNorm(d)
         self.out = nn.Linear(d, 1)
         self.aux = nn.ModuleDict({m: nn.Linear(d, 1) for m in MODALITIES}) if cfg.aux_heads else None
-        if cfg.anchor:
+        if cfg.wide:
+            self.wide = nn.Linear(cfg.n_meta, 1)
+            self.gate = nn.Parameter(torch.zeros(1))
+        elif cfg.anchor:
             self.anchor_head = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, 1))
             self.gate = nn.Parameter(torch.zeros(1))
         self.use = torch.tensor([m in cfg.modalities for m in MODALITIES])
@@ -141,7 +145,11 @@ class PlannerNet(nn.Module):
         seq = torch.cat([self.cls.expand(b, -1, -1), toks], 1)
         h = self.norm(self.fusion(seq, src_key_padding_mask=pad))[:, 0]
         out = {"logit": self.out(h).squeeze(-1)}
-        if self.cfg.anchor:
+        if getattr(self.cfg, "wide", False):
+            a = self.wide(meta).squeeze(-1)                                         # raw metadata, linear
+            out["anchor"] = a
+            out["logit"] = a + self.gate * out["logit"]
+        elif self.cfg.anchor:
             a = self.anchor_head(toks[:, 2] - self.type_emb[:, 2]).squeeze(-1)     # metadata token, before fusion
             out["anchor"] = a
             out["logit"] = a + self.gate * out["logit"]
@@ -185,10 +193,10 @@ class Planner:
         if not path.exists():
             raise FileNotFoundError(f"no planner checkpoint at {path}; run `python main.py planner train` first")
         ck = torch.load(path, map_location="cpu", weights_only=False)
-        cfg = PlannerConfig(**{**ck["config"], "modalities": tuple(ck["config"]["modalities"])})
-        net = PlannerNet(cfg)
-        net.load_state_dict(ck["state_dict"])
-        return cls(net, device or settings.device_for("orchestrator"))
+        if "ensemble" in ck:
+            return EnsemblePlanner([_net(m) for m in ck["ensemble"]], device or settings.device_for("orchestrator"),
+                                   ck.get("meta", {}))
+        return cls(_net(ck), device or settings.device_for("orchestrator"))
 
     @torch.no_grad()
     def score(self, x: dict, batch: int = 2048, attn: bool = False) -> dict[str, np.ndarray]:
@@ -202,6 +210,48 @@ class Planner:
             out.append(torch.sigmoid(o["logit"] / self.cfg.temperature).float().cpu().numpy())
             if attn:
                 att.append(o["attention"].float().cpu().numpy())
+        res = {"p": np.concatenate(out) if out else np.zeros(0)}
+        if attn:
+            res["attention"] = np.concatenate(att) if att else np.zeros((0, len(MODALITIES)))
+        return res
+
+
+def _net(ck: dict) -> PlannerNet:
+    cfg = PlannerConfig(**{**ck["config"], "modalities": tuple(ck["config"]["modalities"])})
+    net = PlannerNet(cfg)
+    net.load_state_dict(ck["state_dict"])
+    return net
+
+
+class EnsemblePlanner(Planner):
+    """The nested-selection final model: the mean logit of several PlannerNets (inner folds x seeds at the selected
+    epoch, ``src/ml/planner_nested.py``). Same ``score`` interface; attention is averaged."""
+
+    def __init__(self, nets: list[PlannerNet], device: str = "cpu", meta: dict | None = None):
+        super().__init__(nets[0], device)
+        self.nets = [n.to(device).eval() for n in nets]
+        self.meta = meta or {}
+
+    @staticmethod
+    def save_ensemble(nets: list[PlannerNet], path: Path, meta: dict | None = None) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"ensemble": [{"config": asdict(n.cfg), "state_dict": {k: v.cpu() for k, v in
+                                                                          n.state_dict().items()}} for n in nets],
+                    "meta": meta or {}}, path)
+        return path
+
+    @torch.no_grad()
+    def score(self, x: dict, batch: int = 2048, attn: bool = False) -> dict[str, np.ndarray]:
+        out, att = [], []
+        n = len(x["path"])
+        for i in range(0, n, batch):
+            sl = slice(i, i + batch)
+            t = {k: torch.from_numpy(np.ascontiguousarray(v[sl])).to(self.device) for k, v in x.items()}
+            os_ = [m(t["path"], t["header"], t["meta"], t["content"], t["context"], t["present"], attn=attn)
+                   for m in self.nets]
+            out.append(torch.sigmoid(torch.stack([o["logit"] for o in os_]).mean(0)).float().cpu().numpy())
+            if attn:
+                att.append(torch.stack([o["attention"] for o in os_]).mean(0).float().cpu().numpy())
         res = {"p": np.concatenate(out) if out else np.zeros(0)}
         if attn:
             res["attention"] = np.concatenate(att) if att else np.zeros((0, len(MODALITIES)))

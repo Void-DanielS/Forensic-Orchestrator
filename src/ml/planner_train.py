@@ -54,10 +54,23 @@ ABLATIONS = {"path": ("path",), "header": ("header",), "metadata": ("metadata",)
 EXPERIMENTAL = {"anchored + aug": ("path", "header", "metadata", "content"),
                 "anchored + Jev header": ("path", "header", "metadata", "content"),
                 "anchored + noisy student": ("path", "header", "metadata", "content")}
-EXTRA = {"anchored + aug": {"augment": True},
+EXPERIMENTAL.update({"wide & deep": ("path", "header", "metadata", "content"),
+                     "wide & deep + aug": ("path", "header", "metadata", "content")})
+EXPERIMENTAL.update({"wide & deep + refit": ("path", "header", "metadata", "content"),
+                     "anchored + refit": ("path", "header", "metadata", "content")})
+EXPERIMENTAL["wide & deep + aug + refit"] = ("path", "header", "metadata", "content")
+EXPERIMENTAL["wide & deep + LLM prior"] = ("path", "header", "metadata", "content")
+EXPERIMENTAL["wide & deep + tuned prior"] = ("path", "header", "metadata", "content")
+# metadata vector extended with an LLM prior (PlanData.with_prior): variant -> scores file in the dataset directory
+PRIOR_VARIANTS = {"wide & deep + LLM prior": "llm_prior.npz",          # zero-shot
+                  "wide & deep + tuned prior": "llm_prior_tuned.npz"}  # LoRA-tuned on public write-ups
+EXTRA = {"wide & deep + LLM prior": {"wide": True}, "wide & deep + tuned prior": {"wide": True}, "wide & deep + aug + refit": {"wide": True, "augment": True, "refit": True},
+         "wide & deep + refit": {"wide": True, "refit": True}, "anchored + refit": {"refit": True},
+         "wide & deep": {"wide": True}, "wide & deep + aug": {"wide": True, "augment": True},
+         "anchored + aug": {"augment": True},
          "anchored + Jev header": {"jev": True},
          "anchored + noisy student": {"augment": True, "student": True}}
-ANCHOR_VARIANTS = {"anchored", "anchored + SSL frozen", "anchored + aug", "anchored + Jev header",
+ANCHOR_VARIANTS = {"anchored", "anchored + refit", "anchored + SSL frozen", "anchored + aug", "anchored + Jev header",
                    "anchored + noisy student"}
 AUX_VARIANTS = {"all + aux heads"}
 # encoders initialised from the self-supervised checkpoint (src/ml/planner_pretrain.py): name -> frozen?
@@ -91,7 +104,41 @@ class PlanData:
         self.cases = sorted(set(self.case))
         self.items = {c: answer_items([r for r in self.rows if r["case_id"] == c]) for c in self.cases}
 
+    _dev: "tuple[str, dict[str, torch.Tensor]] | None" = None
+
+    def with_prior(self, file: str = "llm_prior.npz") -> "PlanData":
+        """A view whose metadata vector also holds the zero-shot LLM relevance prior (``src/ml/llm_prior.py``):
+        [prior / 10, prior z-scored within its case]. The z-score uses only the case's own scores (no labels), so it
+        is available at inference. Everything else is shared."""
+        import copy
+
+        from src.ml.llm_prior import prior_path
+
+        z = np.load(prior_path(self.dir).with_name(file))
+        L = z["score"].astype(np.float32)
+        if len(L) != len(self.case) or not (z["case"] == self.case).all():
+            raise SystemExit(f"{file} does not match the dataset: rerun `python -m src.ml.llm_prior`")
+        Lz = np.zeros_like(L)
+        for c in self.cases:
+            m = self.case == c
+            Lz[m] = (L[m] - L[m].mean()) / (L[m].std() + 1e-6)
+        o = copy.copy(self)
+        o.x = dict(self.x)
+        o.x["meta"] = np.c_[self.x["meta"], L / 10, Lz].astype(np.float32)
+        o._dev = None
+        return o
+
+    def cache(self, device: str) -> "PlanData":
+        """Keep every input tensor on ``device`` (about 0.3 GB): batches are then gathered on the GPU instead of
+        being copied from host memory at every step. Same values, so results do not change."""
+        if self._dev is None or self._dev[0] != device:
+            self._dev = (device, {k: torch.from_numpy(np.ascontiguousarray(v)).to(device) for k, v in self.x.items()})
+        return self
+
     def tensors(self, idx: np.ndarray, device: str) -> dict[str, torch.Tensor]:
+        if self._dev is not None and self._dev[0] == device:
+            it = torch.from_numpy(np.asarray(idx, dtype=np.int64)).to(device)
+            return {k: v.index_select(0, it) for k, v in self._dev[1].items()}
         return {k: torch.from_numpy(np.ascontiguousarray(v[idx])).to(device) for k, v in self.x.items()}
 
 
@@ -256,13 +303,18 @@ def train_model(data: PlanData, train_cases: list[str], val_cases: list[str], mo
                 steps_per_epoch: int = 150, batch: int = 256, lr: float = 2e-3, seed: int = 13,
                 device: str | None = None, aux: bool = False, init: Path | None = None,
                 freeze: bool = False, anchor: bool = False, augment_: bool = False, jev: bool = False,
-                pseudo: "Pseudo | None" = None) -> tuple[PlannerNet, dict]:
+                pseudo: "Pseudo | None" = None, wide: bool = False,
+                stop_at: int | None = None, on_epoch=None) -> tuple[PlannerNet, dict]:
+    """``stop_at``: no validation; train the same schedule and keep the model after epoch ``stop_at`` (used to refit
+    on training + validation cases once the epoch has been chosen on validation).
+    ``on_epoch(epoch, net)``: called after every epoch (and at epoch 0 for wide & deep, whose initial state is the
+    fitted logistic regression); the nested selection records validation AP and held-out scores through it."""
     device = device or settings.device_for("orchestrator")
     deterministic(seed)
     tr = np.flatnonzero(np.isin(data.case, train_cases))
     va = np.flatnonzero(np.isin(data.case, val_cases))
-    cfg = PlannerConfig(modalities=tuple(modalities), aux_heads=aux, anchor=anchor, header_jev=jev,
-                        modality_dropout=AUX_MODALITY_DROPOUT if aux else 0.15)
+    cfg = PlannerConfig(modalities=tuple(modalities), aux_heads=aux, anchor=anchor, header_jev=jev, wide=wide,
+                        modality_dropout=AUX_MODALITY_DROPOUT if aux else 0.15, n_meta=data.x["meta"].shape[1])
     net = PlannerNet(cfg)
     loaded: list[str] = []
     slow: set[int] = set()
@@ -272,6 +324,16 @@ def train_model(data: PlanData, train_cases: list[str], val_cases: list[str], mo
         load_jev(net)
         slow = {id(p) for p in net.enc["header"].trunk.parameters()}
         cfg.meta.update(transfer="jev byte CNN -> header encoder")
+    if wide:
+        # wide part = logistic regression on the metadata of the TRAINING cases only, frozen; the deep part learns a
+        # gated residual. (Until 2026-11-17 the LR was also fitted on the validation case, which then chose the epoch:
+        # that favoured epoch 0 = pure LR. Fixed; see docs/PREREGISTRATION.md.)
+        lin = fit_logreg(data, list(train_cases))
+        with torch.no_grad():
+            net.wide.weight.copy_(lin.weight)
+            net.wide.bias.copy_(lin.bias)
+        net.wide.requires_grad_(False)
+        cfg.meta.update(wide="logistic regression on metadata (training cases only), frozen")
     cfg.meta.update(augment=augment_, self_training=pseudo is not None)
     if init is not None:
         from src.ml.planner_pretrain import load_into
@@ -289,7 +351,20 @@ def train_model(data: PlanData, train_cases: list[str], val_cases: list[str], mo
                                                 total_steps=epochs * steps_per_epoch, pct_start=0.1)
     w = _sample_weights(data, tr)
     best, best_state, best_ep = -1.0, None, 0
+
+    def _val_ap() -> float:
+        s_va = predict(net, data, va, device)
+        aps = [average_precision(data.y[va][data.case[va] == c], s_va[data.case[va] == c]) for c in val_cases]
+        return float(np.mean([a for a in aps if a is not None])) if any(a is not None for a in aps) else 0.0
+
+    if wide or stop_at == 0:
+        best = _val_ap() if stop_at is None else 0.0
+        best_state = {k: v.detach().clone() for k, v in net.state_dict().items()}
+        if on_epoch is not None:
+            on_epoch(0, net)
     for ep in range(1, epochs + 1):
+        if stop_at is not None and ep > stop_at:
+            break
         net.train()
         draw = tr[torch.multinomial(w, steps_per_epoch * batch, replacement=True).numpy()]
         pdraw = (torch.multinomial(pseudo.w, steps_per_epoch * (batch // 2), replacement=True).numpy()
@@ -324,9 +399,13 @@ def train_model(data: PlanData, train_cases: list[str], val_cases: list[str], mo
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
             sched.step()
-        s_va = predict(net, data, va, device)
-        aps = [average_precision(data.y[va][data.case[va] == c], s_va[data.case[va] == c]) for c in val_cases]
-        sel = float(np.mean([a for a in aps if a is not None])) if any(a is not None for a in aps) else 0.0
+        if stop_at is not None:
+            if ep == stop_at:
+                best_ep, best_state = ep, {k: v.detach().clone() for k, v in net.state_dict().items()}
+            continue
+        if on_epoch is not None:
+            on_epoch(ep, net)
+        sel = _val_ap()
         if sel > best:
             best, best_ep = sel, ep
             best_state = {k: v.detach().clone() for k, v in net.state_dict().items()}
@@ -345,14 +424,25 @@ def train_variant(data: PlanData, name: str, tr_cases: list[str], va_cases: list
     ex = EXTRA.get(name, {})
     kw = dict(epochs=epochs, seed=seed, device=device, aux=name in AUX_VARIANTS,
               init=encoders if name in SSL_VARIANTS else None, freeze=SSL_VARIANTS.get(name, False),
-              anchor=name in ANCHOR_VARIANTS, augment_=ex.get("augment", False), jev=ex.get("jev", False))
+              anchor=name in ANCHOR_VARIANTS, augment_=ex.get("augment", False), jev=ex.get("jev", False),
+              wide=ex.get("wide", False))
     pseudo = None
     if ex.get("student"):
         teacher, _ = train_model(data, tr_cases, va_cases, {**ABLATIONS, **EXPERIMENTAL}[name], **{**kw, "augment_": False})
         pre = pretrain_data()
         pseudo = Pseudo(pre, pseudo_labels(teacher, pre, device or settings.device_for("orchestrator")))
         del teacher
-    return train_model(data, tr_cases, va_cases, {**ABLATIONS, **EXPERIMENTAL}[name], pseudo=pseudo, **kw)
+    net, info = train_model(data, tr_cases, va_cases, {**ABLATIONS, **EXPERIMENTAL}[name], pseudo=pseudo, **kw)
+    if ex.get("refit"):
+        # the epoch (and, for wide & deep, whether the deep part is used at all) is chosen on the validation case;
+        # then the same schedule is retrained on training + validation cases, so the network sees as many cases as
+        # the logistic-regression baseline. No held-out information is used.
+        t = net.cfg.temperature
+        net, _ = train_model(data, list(tr_cases) + list(va_cases), [], {**ABLATIONS, **EXPERIMENTAL}[name],
+                             pseudo=pseudo, stop_at=info["best_epoch"], **kw)
+        net.cfg.temperature = t
+        net.cfg.meta.update(refit_epochs=info["best_epoch"], selection_val_ap=round(info["val_ap"], 4))
+    return net, info
 
 
 MIN_VAL_POSITIVES = 10
@@ -379,20 +469,10 @@ def _val_split(cases: list[str], seed: int, data: "PlanData | None" = None, n: i
 
 
 # ---------------------------------------------------------------------------------------------- baselines
-def baseline_scores(data: PlanData, train_cases: list[str], test_idx: np.ndarray, seed: int) -> dict[str, np.ndarray]:
-    tr = np.isin(data.case, train_cases)
-    cats = np.array([r["category"] for r in data.rows])
-    rate = {}
-    for c in set(cats):
-        m = tr & (cats == c)
-        # per-case average so one big case does not decide the prior
-        per_case = [data.y[m & (data.case == k)].mean() for k in train_cases if (m & (data.case == k)).any()]
-        rate[c] = float(np.mean(per_case)) if per_case else 0.0
-    size = data.x["meta"][:, 0]
-    prior = np.array([rate.get(c, 0.0) for c in cats[test_idx]]) + 1e-6 * size[test_idx]
-    # logistic regression on metadata (same case-balanced weights)
+def fit_logreg(data: PlanData, train_cases: list[str]) -> torch.nn.Linear:
+    """L2 logistic regression on the metadata vector with case-balanced weights (LBFGS, CPU, deterministic)."""
     xm = torch.from_numpy(data.x["meta"])
-    tri = np.flatnonzero(tr)
+    tri = np.flatnonzero(np.isin(data.case, train_cases))
     w = _sample_weights(data, tri).float() * len(tri)
     lin = torch.nn.Linear(xm.shape[1], 1)
     opt = torch.optim.LBFGS(lin.parameters(), max_iter=200)
@@ -406,6 +486,22 @@ def baseline_scores(data: PlanData, train_cases: list[str], test_idx: np.ndarray
         return loss
 
     opt.step(closure)
+    return lin
+
+
+def baseline_scores(data: PlanData, train_cases: list[str], test_idx: np.ndarray, seed: int) -> dict[str, np.ndarray]:
+    tr = np.isin(data.case, train_cases)
+    cats = np.array([r["category"] for r in data.rows])
+    rate = {}
+    for c in set(cats):
+        m = tr & (cats == c)
+        # per-case average so one big case does not decide the prior
+        per_case = [data.y[m & (data.case == k)].mean() for k in train_cases if (m & (data.case == k)).any()]
+        rate[c] = float(np.mean(per_case)) if per_case else 0.0
+    size = data.x["meta"][:, 0]
+    prior = np.array([rate.get(c, 0.0) for c in cats[test_idx]]) + 1e-6 * size[test_idx]
+    xm = torch.from_numpy(data.x["meta"])
+    lin = fit_logreg(data, train_cases)
     with torch.no_grad():
         lr_s = lin(xm[test_idx]).squeeze(-1).numpy()
     rng = np.random.default_rng(seed)
@@ -414,7 +510,8 @@ def baseline_scores(data: PlanData, train_cases: list[str], test_idx: np.ndarray
 
 # ---------------------------------------------------------------------------------------------- LOCO
 def loco(data: PlanData, ablations: dict = ABLATIONS, epochs: int = 10, seed: int = 13, progress: bool = True,
-         device: str | None = None, save_dir: Path | None = None, encoders: Path | None = None) -> dict:
+         device: str | None = None, save_dir: Path | None = None, encoders: Path | None = None,
+         scores: dict | None = None) -> dict:
     """Leave-one-case-out; with ``save_dir`` the full model of every fold is kept (``<case>.pt``) so a solved case
     can be investigated end to end by a model that never saw it."""
     res: dict = defaultdict(dict)
@@ -431,6 +528,8 @@ def loco(data: PlanData, ablations: dict = ABLATIONS, epochs: int = 10, seed: in
         for name, mods in ablations.items():
             net, info = train_variant(data, name, tr_cases, va_cases, epochs, seed, device, encoders)
             s = predict(net, data, te, device or settings.device_for("orchestrator"))
+            if scores is not None:
+                scores[(name, test)] = s
             res[name][test] = {**case_metrics(y, s, items), "best_epoch": info["best_epoch"],
                                "inner_val_ap": round(info["val_ap"], 4)}
             if save_dir is not None and name in CANDIDATES:

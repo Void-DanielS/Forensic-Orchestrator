@@ -1,7 +1,235 @@
 # HANDOVER: ForensiAgent-Multimodal
 
-_Last updated: 2026-11-16 (deep-learning focus: Jev-MM multimodal model, investigation planner + self-supervised encoders, DL pipeline, evidence repair).
+_Last updated: 2026-11-17 (read §000 first: planner metrics are the open problem; orchestrated LLM agents built). Previous: 2026-11-16 (deep-learning focus: Jev-MM multimodal model, investigation planner + self-supervised encoders, DL pipeline, evidence repair).
 Read §0 first, then §1c / §1d. README.md is the full, peer-facing project report (results, metrics, limitations)._
+
+## 0000. 2026-11-17 (later): pre-registered protocol + fixes (read first)
+
+The user approved a protocol after a diagnosis. It is committed in `c91f4d6`: `docs/PREREGISTRATION.md` +
+`src/ml/planner_protocol.py`. Do NOT change it after seeing held-out numbers; log deviations in the doc.
+
+- **"Clearly beats LR":** ONE final model chosen by nested inner-LOCO selection. It must meet all three:
+  - mean AP gain ≥ 0.05;
+  - paired-bootstrap 95 % CI lower bound > 0;
+  - wins on ≥ 9 / 13 cases.
+- **User-level metric:** secondary, defined by `is_container`. Only 123 / 33k files are containers; there is no
+  pagefile or unallocated space in the dataset.
+- **Orchestration:** results are split by source (LLM / tool / image / union / LLM-only), and the run includes a
+  no-tool ablation and an LR top-K control. It runs only after the planner is frozen; mvs_2024 and ngdc_2012 are
+  excluded.
+
+Fixes done (uncommitted):
+
+1. **Wide & deep leak:** the frozen LR part was fitted on train + the validation case, which then chose the epoch.
+   It is now fitted on the training cases only (`planner_train.train_model`).
+2. **Nested selection:** `src/ml/planner_nested.py`.
+   - `run`: resumable, per-fold `.npz`/`.json`.
+   - `report`: verdict + user-level metric.
+   - `deploy`: rebuilds the ensembles and checks that they reproduce the recorded scores.
+   - The ensemble checkpoint is `planner.EnsemblePlanner`.
+   - `PlanData.cache(device)` keeps the inputs on the GPU, about 2× faster with identical values.
+3. **LLM prior:**
+   - **bf16 rounding:** scores came out in 0.125 steps (60 distinct / 600). The Yes/No logits are now computed in fp32
+     from the last hidden state; 1,787 distinct / 2,000, corr 0.994 with the old scores.
+   - **RAM:** the commit charge grew because each padded length left blocks in the CUDA cache, and on WDDM those count
+     toward the process commit (10 → 15 GB in 600 files). Fixed with padding to multiples of 64 + periodic
+     `empty_cache` (flat at 11.4 GB).
+   - **Speed:** about 90 ms/file, so about 50 min for the whole dataset.
+   - **Wiring:** variant `wide & deep + LLM prior` uses `PlanData.with_prior()`; `solve.prior_columns` supplies the
+     prior at inference.
+4. **Orchestration:**
+   - `investigate(tools=, ranker="lr")`, `orchestrate.split_evaluation`, `scoring.found_entities`;
+   - `orchestrate_eval` is resumable, with modes full / nofeedback / notool / lr and `--planners <dir>`;
+   - CLI `--no-tool --ranker lr`.
+
+Progress 2026-11-17:
+
+- **Prior:** done, `data/datasets/planner/20261116/llm_prior.npz` (33,047 scores, 20,491 distinct, 63 min).
+- **Orchestration timing:** 337 s per case at K = 100 on a free GPU, so K = 100 is kept (recorded in the
+  pre-registration, `b632621`).
+- **Nested run:** STARTED at about 11:50 → `data/outputs/ml/planner/nested_20261117`, log
+  `data/outputs/planner_nested.log`. It is resumable: rerun the same command and finished folds are skipped.
+- **Paper:**
+  - Tectonic is at `%LOCALAPPDATA%/ForensiAgent/tools/tectonic.exe`.
+  - With the placeholders stubbed, `../dl-report-final.tex` compiles.
+  - The orchestration figure had `\[2pt]` (display math) instead of `\\[2pt]`, and `\st{Verified}` (strikethrough).
+    Both are fixed.
+  - Compile from the parent folder: `tectonic.exe -X compile dl-report-final.tex`.
+
+**Tuned prior (user request, 2026-11-17; pre-registration deviation `78b39ea` + clarification `742e55f`, written
+before any held-out number was read):**
+
+- The user's direction: scrape only plain text (case context → solution) and train only by fine-tuning or deep
+  learning. No hand-built features.
+- **Corpus:** `src/ml/writeups.py`. It reads the shallow clones in `data/external/writeups/` (git-ignored, untrusted
+  data, never executed; one cloned repo ships a CLAUDE.md, which is just data) and writes
+  `data/datasets/writeups/pairs.jsonl`:
+  - 274 pairs (ChickenLoner Write_It_UP, Panagiotis-INS Cyber-Defenders, Baniur, dbissell6 DFIR, isaac-do,
+    mikehorn-git, stark4n6);
+  - leak filter: none named a dataset case; 75 were dropped because they contain an answer-key identifier.
+- **Fine-tune:** `src/ml/finetune_prior.py`.
+  - LoRA with the fixed recipe, about 260k training tokens (67 % of the examples are cut at 1,024 tokens).
+  - The adapter goes to `data/models/llm_prior_lora/`, and `training.json` records the held-out loss before and
+    after (descriptive only).
+- **Tuned prior:** `python -m src.ml.llm_prior --adapter data/models/llm_prior_lora` → `llm_prior_tuned.npz`, with the
+  same prompt and unquantised as before.
+- **Candidate:** `wide & deep + tuned prior`, wired as follows:
+  - `PRIOR_VARIANTS` is now variant → npz file;
+  - `planner_nested extend <run>` trains only the new candidate's inner folds and merges them;
+  - selection is still one final model over all six candidates;
+  - `deploy` and `solve.plan` read `prior_file` from the checkpoint.
+- **Run all of it:** `bash scripts/tuned_prior_chain.sh`, only after the nested run has finished (GPU). It takes
+  about 15 min + 63 min + 1.7 h.
+
+Next, in order:
+
+1. Wait for the nested run to finish (about 38 min per case, so done around 20:00).
+2. `bash scripts/tuned_prior_chain.sh`.
+3. `planner_nested report`, then `deploy`.
+4. `python -m src.eval.orchestrate_eval --planners <nested>/models` overnight.
+5. Paper (Tectonic allowed). Mention:
+   - the write-up corpus and its leak filter;
+   - that the base LLM may have seen the dataset cases in pre-training.
+
+## 000. 2026-11-17 HANDOFF: the planner metrics are bad; plan to fix them
+
+**User requirements (2026-11-16/17, hard):**
+1. At least one DL planner variant must **clearly** beat logistic regression on metadata ("No, at least one variant has to clearly beat the logistic regression").
+2. At least two **intelligent (model-driven, not deterministic) agents orchestrated together**.
+3. Then remake the paper (`../dl-report-final.tex`).
+
+The user, on the current numbers: "improve those horrible metrics".
+
+Improve only legitimately: choose models, weights and epochs on training or inner-validation cases, **never** on held-out cases, and say so in the paper.
+
+### Where the planner stands
+
+LOCO evaluation, 13 rankable held-out cases, 3 seeds (mean ± std over seeds).
+
+| model | AUROC | AP | cov@10 | cov@50 | cov@100 |
+|---|---|---|---|---|---|
+| random | 0.496 | 0.035 | 0.004 | 0.103 | 0.182 |
+| category prior | 0.776 | 0.264 | 0.373 | 0.614 | 0.689 |
+| **logistic regression (metadata)** | 0.767 | **0.301** | 0.440 | 0.708 | 0.782 |
+| anchored | 0.724 | 0.279 ± 0.026 | 0.433 | 0.632 | 0.691 |
+| anchored + aug | 0.740 | 0.274 ± 0.016 | 0.451 | 0.659 | 0.699 |
+| anchored + Jev header (transfer) | 0.743 | 0.177 ± 0.029 | 0.410 | 0.619 | 0.672 |
+| anchored + noisy student | 0.751 | 0.282 ± 0.038 | 0.506 | 0.643 | 0.703 |
+| wide & deep | 0.766 | 0.287 ± 0.027 | 0.429 | 0.684 | 0.774 |
+| wide & deep + aug | 0.762 | 0.295 ± 0.019 | 0.472 | 0.674 | 0.740 |
+| wide & deep + aug, **seed ensemble** | 0.765 | **0.323** | 0.532 | 0.708 | 0.755 |
+| wide & deep + refit | 0.751 | 0.266 ± 0.011 | 0.416 | 0.676 | 0.725 |
+| anchored + refit | 0.722 | 0.267 ± 0.002 | 0.428 | 0.635 | 0.688 |
+
+- Reports: `data/outputs/ml/planner/seeds_2026111{6,7}_*/REPORT.md`.
+- Logs: `data/outputs/planner_seeds_{wide,refit,experimental}.log`.
+
+Nothing clearly beats LR. The 0.323 seed ensemble is within case-to-case noise.
+
+**CPU probes.** These were single scratch runs with 5-seed ensembles. They are exploratory and NOT reportable as-is, because several settings were compared on held-out cases.
+
+| probe | AP |
+|---|---|
+| MLP on metadata (more epochs or width made it worse) | 0.307–0.320 |
+| MLP + content-embedding PCA (more PCs made it worse) | 0.19–0.29 |
+| LR + cosine(content, brief) | 0.300 |
+| LR + cross-case file-name commonness (from the 50 unlabelled cases) | 0.308 |
+| LR/MLP + directory-sibling aggregates (GraphSAGE-like) | 0.26–0.27, but AUROC **0.79–0.81** |
+| ListNet / pairwise ranking losses | 0.22–0.32 |
+
+### Diagnosis: why the metrics are bad
+
+1. **The unit is the case, and there are only 16.** Anything learned from content (path characters, snippet embedding, header bytes) fits case-specific cues. Adding content PCs hurts monotonically. Only metadata transfers, and LR already uses it well.
+2. **The metric is noisy.** AP is averaged over 13 cases, and 5 of them have 6 or fewer relevant files. dfrws2017 and vto_qysea_fifish_p3 have exactly 1, so their AP is 1/rank. One case moves the mean by about ±0.03, which is the size of every effect above.
+3. **Selection is noisy.** Epoch, gate and variant are chosen on ONE inner-validation case. Wide & deep often picks epoch 0 (pure LR) or a bad deep epoch. Refit on train+val removed the validation case and got worse.
+4. **The labels are noisy proxies.** "Relevant" means the file's bytes contain an answer-key identifier. So `$MFT`, `$LogFile`, `pagefile.sys`, unallocated blobs and big SQLite databases are positives in almost every case. Metadata (size, category) finds them easily, which is exactly why LR is strong. User-level files are the hard part.
+5. **LR had more training data.** LR was fitted on 15 cases, the nets on 14. This is fixed in the wide part and in refit, and is not the main cause.
+
+### Plan to improve
+
+Work through these in order. For each step: run it, record the result here, and decide by inner validation only.
+
+**1. Zero-shot LLM relevance prior (code ready, never completed).**
+- `src/ml/llm_prior.py` asks the local Qwen2.5-VL-3B (text-only) "is this file likely to answer the investigation?" for every file.
+- It stores `log P(Yes) - log P(No)` from one forward pass (`logits_to_keep=1`). That is about 0.1 s per file, so roughly 10–15 minutes for 33k files.
+- Nothing is trained on the labelled cases, so there is nothing to overfit. This is transfer learning from a foundation model.
+
+```
+FORENSI_VLM_QUANT=none HF_HUB_OFFLINE=1 .venv/Scripts/python -m src.ml.llm_prior --batch 8
+.venv/Scripts/python -m src.ml.llm_prior_eval        # LR vs LLM alone vs LR(metadata + LLM prior)
+```
+
+- The full run was **stopped by Claude Code because system RAM ran low**; it is not a bug. Close other programs and use `--batch 8`.
+- If LR + prior wins:
+  - Add it to the planner as an extra input of the wide part: `wide & deep + LLM prior`, where wide = LR(meta, prior) fitted on train+val.
+  - Compute the prior at inference in `solve.plan()` for new cases.
+  - Run `planner_seeds` with it and deploy by inner-validation AP.
+- Choose prompt variants (brief length, snippet length) on training cases only.
+
+**2. Fine-tune the LLM prior (LoRA, per LOCO fold).**
+- If zero-shot helps, fine-tune Qwen with LoRA on the training cases' files (balanced, about 2k examples per fold, 1 epoch), then score the held-out case.
+- This is the "fine-tuning" the user asked for, applied where it can transfer (understanding the brief against the file). It avoids encoders that memorise paths.
+
+**3. Robust selection.**
+- Replace the single validation case with inner leave-one-case-out (or 3 validation cases) to pick epoch, gate and variant.
+- Average the inner folds' models as an ensemble.
+- This is cheap for wide & deep because the deep part is small, and it removes cause 3.
+
+**4. Ensembles declared in advance.**
+- Seed ensembles already do better (0.323 vs 0.295).
+- `planner_seeds` now saves `scores.npz` per run, so a fixed recipe (e.g. the mean of LR-anchored nets over 5 seeds × 2 variants) can be evaluated without new training.
+- Decide the recipe BEFORE looking at test numbers, and write it down here.
+
+**5. Graph / directory context.**
+- Directory-sibling aggregation raised AUROC to about 0.80 in the probe, though AP fell.
+- Build a proper GNN layer inside PlannerNet: GraphSAGE over file → parent directory → grandparent, with the LR anchor, tuned on inner validation.
+- This is promising because directory structure transfers across cases and content does not.
+
+**6. Fix the label proxy.** Decide in advance, apply to every model, and report both versions.
+- Also report metrics on "user-level" files only (excluding file-system metafiles, pagefile/hiberfil and unallocated), where ranking is the real problem.
+- And/or weight positives by their number of distinct answer items.
+- Do NOT pick whichever definition favours the net.
+
+**7. Report uncertainty.**
+- Use a paired bootstrap over cases or a Wilcoxon signed-rank test for each model vs LR, plus a per-case AP table.
+- A "clear" win must hold case by case (wins on most cases), not just in the mean.
+
+**8. More labelled cases (the biggest lever long term).**
+- See §00 "Next steps" 1a–1e.
+- Also generate **synthetic labelled cases** by planting key-like tokens (names, e-mails, URLs) into copies of benign files from unlabelled cases; the labels are then exact.
+
+**9. Drop or freeze the content and path encoders** inside the deep part unless inner validation keeps them (so far they hurt).
+
+### Code added 2026-11-16/17 (all uncommitted on `sprint-2`)
+
+**Planner:**
+- `src/ml/planner.py`: `PlannerConfig.wide`. The wide part is a frozen copy of the LR, plus a gate g = 0 on the deep fusion.
+- `src/ml/planner_train.py`:
+  - `fit_logreg`, shared by the baseline and the wide part.
+  - Variants `wide & deep`, `wide & deep + aug`, `wide & deep + refit`, `anchored + refit`, and `wide & deep + aug + refit` (never run).
+  - `train_model(..., wide=, stop_at=)`: refit on train+val at the chosen epoch.
+  - `loco(..., scores=)`.
+- `src/ml/planner_seeds.py`: `--variants`, seed ensembles (`ensemble()`), `scores.npz`.
+- `src/ml/llm_prior.py` and `src/ml/llm_prior_eval.py`: step 1 above.
+
+**Orchestrated agents (requirement 2):**
+- `src/agents/llm.py`: `LocalLLM`, sharing the VLM weights.
+- `src/agents/analyst_agent.py`: the LLM reads files given the brief and the current leads. Its quotes are located in the file bytes and verified; invented quotes become REJECTED (counted as hallucinations caught). Leads come only from verified quotes.
+- `src/pipeline/orchestrate.py`:
+  - The planner is the orchestrator: rounds of 25 files and a blackboard of verified leads.
+  - Re-rank score: `logit(p) + 2*log1p(hits)`.
+  - Image agent: Jev-MM, plus the VLM on the top 3 images per round.
+- `src/eval/orchestrate_eval.py` and `main.py orchestrate`.
+- Tests: `tests/test_orchestrate.py` (5 tests, fake LLM).
+- A smoke test on nist_hacking_case produced good verified quotes and 11 rejected hallucinations.
+- **Not yet evaluated on the 16 cases.** Command: `FORENSI_VLM_QUANT=none .venv/Scripts/python -m src.eval.orchestrate_eval --k 100` (feedback vs no-feedback). It ran at about 14 s per file while the GPU was shared, so expect several hours; run it when the GPU is free.
+
+**Paper (`../dl-report-final.tex`):**
+- Placeholders still to fill: `\PLANABSTRACT`, `\PLANNERRESULTS`, `\PLANDISCUSSION`.
+- New section "Orchestrated Multi-Agent Investigation" is written; orchestration results are still to add.
+- The PDF is not compiled: there is no LaTeX on the machine. A portable Tectonic was downloaded to the session scratchpad, but running it was blocked, so ask the user.
+
+**Delivery rule:** code zips for peers exclude HANDOVER.md, PROJECT_REPORT.html and any Claude / prompt files.
 
 ## 00. 2026-11-15 HANDOFF (read first): deep-learning focus, multimodal models, evidence repair
 

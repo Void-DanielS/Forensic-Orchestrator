@@ -21,24 +21,49 @@ VARIANTS = ("metadata", "all - context", "all - context + SSL", "all - context +
 KEYS = ("auroc", "ap", "coverage@10", "coverage@50", "coverage@100")
 
 
+def ensemble(data: "pt.PlanData", scores: dict, variants) -> dict:
+    """Per fold, average the seed models' probabilities (a seed ensemble), then the usual case metrics."""
+    out = {}
+    first = next(iter(scores.values()))
+    for v in variants:
+        res = {}
+        for (name, case) in first:
+            if name != v:
+                continue
+            s = np.mean([scores[k][(name, case)] for k in scores], 0)
+            y = data.y[data.case == case]
+            res[case] = pt.case_metrics(y, s, data.items[case])
+        out[f"{v} (seed ensemble)"] = pt.summarize({v: res})[v]
+    return out
+
+
 def main(seeds: list[int], epochs: int = 10, variants: tuple[str, ...] = VARIANTS) -> None:
     data = pt.PlanData()
     known = {**pt.ABLATIONS, **pt.EXPERIMENTAL}
     abl = {k: known[k] for k in variants}
-    runs = {}
+    runs, scores = {}, {}
     for s in seeds:
-        res = pt.loco(data, abl, epochs, s, progress=True, encoders=default_encoders())
+        scores[s] = {}
+        res = pt.loco(data, abl, epochs, s, progress=True, encoders=default_encoders(), scores=scores[s])
         runs[s] = pt.summarize(res)
+    ens = ensemble(data, scores, variants)
     out = settings.OUTPUTS_DIR / "ml" / "planner" / f"seeds_{datetime.now():%Y%m%d_%H%M%S}"
     out.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out / "scores.npz", **{f"{s}|{n}|{c}": v for s in scores for (n, c), v in scores[s].items()})
     names = ["random", "category prior", "logistic regression (metadata)", *variants]
     table = {n: {k: [runs[s][n][k]["mean"] for s in seeds] for k in KEYS} for n in names}
-    (out / "seeds.json").write_text(json.dumps({"seeds": seeds, "runs": runs, "table": table}, indent=1),
+    (out / "seeds.json").write_text(json.dumps({"seeds": seeds, "runs": runs, "table": table, "ensemble": ens},
+                                               indent=1),
                                     encoding="utf-8")
     lines = [f"# Planner seed study (seeds {seeds}, variants {list(variants)}; mean ± std over seeds of the LOCO case means)", "",
              "| model | " + " | ".join(KEYS) + " |", "|---|" + "---|" * len(KEYS)]
     for n in names:
         lines.append(f"| {n} | " + " | ".join(f"{np.mean(v):.3f} ± {np.std(v):.3f}" for v in table[n].values()) + " |")
+    lines += ["", f"Ensembles: probabilities averaged over the {len(seeds)} seed models of each fold (one number each).",
+              "", "| model | " + " | ".join(KEYS) + " |", "|---|" + "---|" * len(KEYS)]
+    for n, m in ens.items():
+        lines.append(f"| {n} | " + " | ".join(f"{m[k]['mean']:.3f}" if m[k]["mean"] is not None else "-"
+                                               for k in KEYS) + " |")
     (out / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 

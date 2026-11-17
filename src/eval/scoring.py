@@ -197,6 +197,19 @@ def key_entities(case_dir: Path, summary: str = "") -> list[dict]:
     return out
 
 
+def found_entities(entities: list[dict], findings: list[dict]) -> set[str]:
+    """Normalised answer-key identifiers that occur in the findings' claims / values (same rule as entity_recall)."""
+    from src.verification.heuristic_verifier import normalize_text
+
+    texts = []
+    for f in findings:
+        parts = [f.get("claim", "")]
+        _flatten(f.get("value"), parts)
+        texts.append(" " + normalize_text(" ".join(parts)) + " ")
+    blob = chr(10).join(texts)
+    return {e["norm"] for e in entities if f" {e['norm']} " in blob}
+
+
 def entity_recall(entities: list[dict], findings: list[dict]) -> dict:
     from src.verification.heuristic_verifier import normalize_text
 

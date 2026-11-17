@@ -40,8 +40,46 @@ def planner_for(case_id: str, checkpoint: Path | None = None):
     return Planner.load(path), str(path)
 
 
-def plan(case, planner, quiet: bool = False) -> tuple[list[dict], np.ndarray, np.ndarray]:
-    """Rows of the case (inputs only, no labels), planner probabilities and modality attention."""
+def prior_columns(case, rows: list[dict], file: str = "llm_prior.npz") -> np.ndarray:
+    """[prior / 10, prior z-scored within the case] for ``rows`` (as ``PlanData.with_prior``). Scores already in the
+    planner dataset's ``llm_prior.npz`` are reused (matched by evidence id + path); the rest are computed live with
+    the local LLM."""
+    from src.ml import llm_prior as lp
+    from src.ml.planner_dataset import brief_text, load
+
+    d = load()
+    cached = {}
+    pp = lp.prior_path(d["dir"]).with_name(file)
+    if pp.exists():
+        z = np.load(pp)["score"]
+        cached = {(r["evidence_id"], r["path"]): float(z[i]) for i, r in enumerate(d["rows"])
+                  if r["case_id"] == case.case_id}
+    L = np.array([cached.get((r["evidence_id"], r["path"]), np.nan) for r in rows], np.float32)
+    miss = np.flatnonzero(np.isnan(L))
+    if len(miss) and file != "llm_prior.npz":
+        raise SystemExit(f"{len(miss)} files have no cached {file} score; the tuned prior is not computed live")
+    if len(miss):
+        brief = lp.short_brief(brief_text(case))
+        L[miss] = lp.LLMPrior().score([lp.prompt(rows[i], brief) for i in miss], batch=16)
+    return np.c_[L / 10, (L - L.mean()) / (L.std() + 1e-6)]
+
+
+def lr_scores(case_id: str, meta: np.ndarray) -> np.ndarray:
+    """Control ranking: the logistic-regression baseline (metadata only), fitted on the OTHER solved cases exactly as
+    in the planner evaluation, applied to this case's metadata vectors (logits)."""
+    import torch
+
+    from src.ml import planner_train as pt
+
+    data = pt.PlanData()
+    lin = pt.fit_logreg(data, [c for c in data.cases if c != case_id])
+    with torch.no_grad():
+        return lin(torch.from_numpy(meta.astype(np.float32))).squeeze(-1).numpy()
+
+
+def plan(case, planner, quiet: bool = False, return_meta: bool = False):
+    """Rows of the case (inputs only, no labels), planner probabilities and modality attention (+ the metadata
+    vectors with ``return_meta``)."""
     from src.ml.mm_dataset import TextEncoder
     from src.ml.planner import features
     from src.ml.planner_dataset import brief_text, case_rows
@@ -54,10 +92,13 @@ def plan(case, planner, quiet: bool = False) -> tuple[list[dict], np.ndarray, np
     snip = enc.encode([r["snippet"] for r in rows], batch=128)
     brief = enc.encode([brief_text(case)[:4000]])
     x = features(rows, head, meta, snip, np.repeat(brief, len(rows), 0))
+    if planner.cfg.n_meta > meta.shape[1]:                  # a planner that uses the zero-shot LLM prior
+        f = getattr(planner, "meta", {}).get("prior_file") or "llm_prior.npz"
+        x["meta"] = np.c_[x["meta"], prior_columns(case, rows, f)].astype(np.float32)
     sc = planner.score(x, attn=True)
     if not quiet:
         print(f"[solve] planner scored {len(rows):,} files in {time.perf_counter() - t0:.1f} s", flush=True)
-    return rows, sc["p"], sc["attention"]
+    return (rows, sc["p"], sc["attention"], meta) if return_meta else (rows, sc["p"], sc["attention"])
 
 
 def is_image(r: dict) -> bool:

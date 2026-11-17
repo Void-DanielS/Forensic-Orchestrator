@@ -449,6 +449,18 @@ def cmd_solve(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_orchestrate(a: argparse.Namespace) -> int:
+    """Orchestrated multi-agent investigation: planner orchestrator + LLM analyst + image agent, in rounds."""
+    from src.pipeline.orchestrate import investigate
+
+    cases = [c.strip() for c in a.case.split(",") if c.strip()]
+    out = [investigate(c, k=a.k, batch=a.batch, feedback=not a.no_feedback, vlm=not a.no_vlm,
+                       checkpoint=Path(a.checkpoint) if a.checkpoint else None, tools=not a.no_tool,
+                       ranker=a.ranker) for c in cases]
+    print(json.dumps(out, indent=1, default=str)[:6000])
+    return 0
+
+
 def cmd_schemas(a: argparse.Namespace) -> int:
     from src.schemas import BridgeRecord, TrainingSample
     from src.verification.models import Finding
@@ -577,6 +589,18 @@ def main(argv: list[str] | None = None) -> int:
     ps.add_argument("--checkpoint", default="")
     ps.add_argument("--vlm", action="store_true", help="also run the Qwen2.5-VL vision agent on dispatched images")
     ps.set_defaults(fn=cmd_solve)
+    po = sub.add_parser("orchestrate", help="orchestrated multi-agent investigation (planner + LLM analyst + image "
+                                           "agent, rounds with a blackboard of verified leads)")
+    po.add_argument("--case", required=True, help="case id (comma-separated for several)")
+    po.add_argument("--k", type=int, default=100, help="file budget")
+    po.add_argument("--batch", type=int, default=25, help="files per round")
+    po.add_argument("--checkpoint", default="")
+    po.add_argument("--no-feedback", action="store_true", help="ablation: one round, no blackboard / re-ranking")
+    po.add_argument("--no-vlm", action="store_true", help="image agent without the Qwen2.5-VL reader")
+    po.add_argument("--no-tool", action="store_true", help="ablation: analyst without the identifier-extraction tool")
+    po.add_argument("--ranker", choices=("planner", "lr"), default="planner",
+                    help="lr = control: top K of the logistic-regression baseline, read once")
+    po.set_defaults(fn=cmd_orchestrate)
     sub.add_parser("schemas", help="write FDX JSON Schemas to docs/schemas/").set_defaults(fn=cmd_schemas)
     pg = sub.add_parser("gui", help="local web interface (http://127.0.0.1:8765)")
     pg.add_argument("--port", type=int, default=8765)

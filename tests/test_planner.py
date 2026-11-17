@@ -170,3 +170,18 @@ def test_augment_preserves_name_signature_and_labels():
     assert torch.equal(a["meta"][:, other], t["meta"][:, other])                       # flags / categories untouched
     assert not torch.equal(a["meta"], t["meta"]) and torch.equal(t["path"], t["path"].clone())
     assert a["path"].min() >= 0 and a["header"].max() < 256
+
+
+def test_wide_and_deep_starts_as_its_linear_part():
+    torch.manual_seed(0)
+    net = PlannerNet(PlannerConfig(modalities=("path", "header", "metadata", "content"), wide=True))
+    b = 8
+    meta = torch.rand(b, net.cfg.n_meta)
+    o = net(torch.randint(0, 129, (b, 160)), torch.randint(0, 256, (b, 256)), meta, torch.randn(b, 768),
+            torch.randn(b, 768), torch.ones(b, 5, dtype=torch.bool))
+    assert torch.allclose(o["logit"], net.wide(meta).squeeze(-1))          # gate = 0: exactly the linear model
+    with torch.no_grad():
+        net.gate.fill_(1.0)
+    o2 = net(torch.randint(0, 129, (b, 160)), torch.randint(0, 256, (b, 256)), meta, torch.randn(b, 768),
+             torch.randn(b, 768), torch.ones(b, 5, dtype=torch.bool))
+    assert not torch.allclose(o2["logit"], o2["anchor"])                    # the deep residual now contributes

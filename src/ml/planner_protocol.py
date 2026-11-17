@@ -76,6 +76,8 @@ def verdict(ap_final: dict[str, float], ap_lr: dict[str, float]) -> dict:
 CANDIDATES = ("metadata", "anchored", "wide & deep", "wide & deep + aug")
 PRIOR_CANDIDATES = ("wide & deep + LLM prior",)      # added only if the zero-shot prior has been computed (one fixed
                                                      # prompt, no prompt tuning)
+TUNED_CANDIDATES = ("wide & deep + tuned prior",)    # deviation of 2026-11-17 (docs/PREREGISTRATION.md): prior from
+                                                     # the LLM LoRA-tuned on public write-ups, same prompt
 SEEDS = (13, 14, 15)
 EPOCHS = 10
 MIN_VAL_POSITIVES = 10
