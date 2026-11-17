@@ -78,7 +78,24 @@ with knowledge of them; this is stated in the paper.
 
 ## Deviations
 
-(none yet)
+* **2026-11-17: one added planner candidate, `wide & deep + tuned prior`.** Added while the nested run of section 1
+  was in progress and before any held-out number from it was read (its output files had not been opened).
+  * **Corpus:** public DFIR challenge write-ups (GitHub repositories of CTF/lab solutions). Each write-up becomes one
+    plain-text pair, *case context* (the scenario text before the first question/solution section) → *solution*
+    (the rest). No other annotation, no hand-built features.
+  * **Exclusion (no leakage):** a write-up is dropped if its path, title or text names any of the 16 dataset cases
+    (alias list in `src/ml/writeups.py`), or if it contains any answer-key identifier of the 16 cases. The list and
+    the filter are fixed before training.
+  * **Fine-tuning:** LoRA on the same Qwen2.5-VL-3B language model used for the zero-shot prior; causal-LM loss on
+    the solution tokens given the context. Fixed recipe, no search: r = 16, alpha = 32, dropout 0.05, all
+    attention and MLP projections of the language model, learning rate 1e-4, 1 epoch, max 1,024 tokens, seed 0. No
+    dataset case or label is seen in training, so one tuned model serves every fold.
+  * **Prior:** identical prompt, scoring and normalisation as `wide & deep + LLM prior`, with the tuned weights.
+  * **Selection:** the candidate joins the nested selection of section 1 (same inner folds, seeds, epochs); the
+    (variant, epoch) is still chosen by mean inner-validation AP over all six candidates, so there is still ONE
+    final model. Decision rule unchanged.
+  * **Note for the paper:** the base LLM may have seen write-ups of the dataset cases in pre-training; this applies
+    equally to the zero-shot prior and cannot be controlled.
 
 ## Decisions recorded under the protocol
 
