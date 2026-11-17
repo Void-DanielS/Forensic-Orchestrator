@@ -79,3 +79,9 @@ with knowledge of them; this is stated in the paper.
 ## Deviations
 
 (none yet)
+
+## Decisions recorded under the protocol
+
+* 2026-11-17: K for section 3. One case (nist_data_leakage, full system) took 337 s on a free GPU (about 3.4 s per
+  file), so 14 cases × 4 systems take at most about 5 h. **K = 100 is kept.** The decision was made from the timing
+  only; no system comparison existed.
