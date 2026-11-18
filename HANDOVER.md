@@ -57,6 +57,25 @@ The improved ensemble's numbers go in the `improve_*` report (fill in here and i
 * The informative cases are the rest: lone_wolf, m57_patents, nist_data_leakage, nist_hacking_case,
   nist_rhino_hunt, owl, vto_parrot_bluegrass, vto_qysea_fifish_p3.
 
+### Paper framing decided with the user: BENCHMARK (important for the paper)
+Results that are not a win (planner, orchestration if weak, tuned prior) go into the paper as **benchmarks
+alongside the other models**, not hidden and not oversold. One benchmark table per task, every model on the same
+held-out cases and metrics:
+* **Image origin (Jev-MM task):** majority class, LR metadata, LR metadata+text, Jev-MM single modalities (vision /
+  metadata / text / vision+metadata), Jev-MM all (single seed, mean +- std), Jev-MM ensemble (improve run).
+  Accuracy, macro-F1, user-gen. AUROC. Sources: `multimodal/20261115_191432/REPORT.md`, `multimodal/improve_*`.
+* **File type from fragments (Jev):** histogram baseline vs Jev CNN (acc, macro-F1), README §6.5.
+* **Evidence ranking (planner), 13 LOCO cases:** LR, metadata MLP, anchored, wide & deep, + aug, + LLM prior,
+  + tuned prior (each at its inner-validation-best epoch: the "Descriptive only" table of the nested REPORT), and the
+  pre-registered final model. AUROC, AP, cov@10/50/100; plus the user-level-files version. State clearly which row
+  is the pre-registered claim (final vs LR: no clear win) and that the others are descriptive (selected on inner
+  validation, not on the held-out case, but not pre-registered as the claim).
+* **LLM fine-tune:** held-out write-up loss / perplexity, zero-shot vs LoRA.
+* **End-to-end agents (K = 100):** full / no feedback / no tool / LR control (+ final system run), by source; main
+  table on all cases + post-hoc table on cases with real identifiers.
+Each table gets a one-line reading (what wins, by how much, CI where available). The text leads with the
+benchmark, then the pre-registered verdicts.
+
 ### TO FIX / DO next session (in order)
 1. **Read the orchestration results** (`eval_k100_final/REPORT.md`; regenerate with `orchestrate_eval report`
    if missing). Report the by-source table honestly.
