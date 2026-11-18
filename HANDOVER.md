@@ -118,6 +118,9 @@ Each table gets a one-line reading (what wins, by how much, CI where available).
 benchmark, then the pre-registered verdicts.
 
 ### TO FIX / DO next session (in order)
+**THE NEXT SESSION IS THE LAST ONE (user). Scope = items 1-4 + 7 only: writing, benchmark tables, paper,
+commit. Items 5-6 are NOT done; mention them in the paper as future work. Step 3 only if time allows (post-hoc).**
+Paper must also include the Jev-MM ensemble row (0.759 / 0.553 / 0.911) and the final-system run (136/869).
 1. **Read the orchestration results** (`eval_k100_final/REPORT.md`; regenerate with `orchestrate_eval report`
    if missing). Report the by-source table honestly.
 2. **Record in `docs/PREREGISTRATION.md` (Decisions / Deviations, dated, results already known so say so):**
