@@ -20,6 +20,18 @@ Read §0 first, then §1c / §1d. README.md is the full, peer-facing project rep
   data/outputs/ml/planner/nested_20261117/models --out data/outputs/ml/orchestrate/eval_k100_final`
   (nothing else on the GPU). Check first: `grep "\[orchestrate-eval\]" data/outputs/orchestrate_eval.log`.
 
+* **Queued after it (`scripts/final_chain.sh`, commit c59ada3):** (1) `python -m src.ml.mm_train improve`:
+  Jev-MM recipes chosen on validation, 3-seed ensemble tested once, LR baseline, deployed to
+  `data/models/multimodal/jev_mm.pt` (old single model kept as `jev_mm_single_seed.pt`); report
+  `data/outputs/ml/multimodal/improve_*/REPORT.md`, log `data/outputs/mm_improve.log`. (2) final-system run, `full`
+  mode only, improved Jev-MM: `data/outputs/ml/orchestrate/final_system_k100/` (log `data/outputs/final_system.log`).
+  Both recorded in `docs/PREREGISTRATION.md` before running. If not finished: run the two commands of the script.
+
+### Jev-MM (image model): DL clearly beats LR
+Test (case-level split): Jev-MM 0.744 acc / 0.533 macro-F1 / 0.899 user-gen. AUROC (mean of 3 seeds) vs logistic
+regression (L2 chosen on val) metadata 0.655 / 0.488 / 0.915, metadata+text 0.692 / 0.489 / 0.893; majority 0.450.
+The improved ensemble's numbers go in the `improve_*` report (fill in here and in the paper).
+
 ### Planner verdict (pre-registered, final; do NOT re-select on held-out cases)
 **Does NOT clearly beat logistic regression.** 13 rankable held-out cases:
 | | AUROC | AP | cov@10 | cov@50 | cov@100 |
