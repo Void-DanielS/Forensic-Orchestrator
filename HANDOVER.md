@@ -20,7 +20,12 @@ Read §0 first, then §1c / §1d. README.md is the full, peer-facing project rep
   data/outputs/ml/planner/nested_20261117/models --out data/outputs/ml/orchestrate/eval_k100_final`
   (nothing else on the GPU). Check first: `grep "\[orchestrate-eval\]" data/outputs/orchestrate_eval.log`.
 
-* **Queued after it (`scripts/final_chain.sh`, commit c59ada3):** (1) `python -m src.ml.mm_train improve`:
+* **2026-11-18 01:4x: the evaluation hit CUDA out-of-memory at `owl|lr` (47 of 56 runs saved).** Resumed with
+  `scripts/resume_final.sh` (same command + `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, appends to the
+  same log; finished runs are skipped), which then runs the two steps below. If it stops again: re-run
+  `bash scripts/resume_final.sh` (every step is resumable / idempotent). Mention the resume in the paper (no
+  configuration change).
+* **Queued after it (now run by `scripts/resume_final.sh`; `final_chain.sh` superseded):** (1) `python -m src.ml.mm_train improve`:
   Jev-MM recipes chosen on validation, 3-seed ensemble tested once, LR baseline, deployed to
   `data/models/multimodal/jev_mm.pt` (old single model kept as `jev_mm_single_seed.pt`); report
   `data/outputs/ml/multimodal/improve_*/REPORT.md`, log `data/outputs/mm_improve.log`. (2) final-system run, `full`
