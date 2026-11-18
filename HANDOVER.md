@@ -17,6 +17,12 @@ items 5-6).
   new end-to-end section + table by source (pre-registered 13 cases + post-hoc 6 cases); discussion, limitations,
   conclusion (future work = identifier filter, listwise loss, LLM as ranker / inside analyst). Compiles with tectonic
   with no overfull boxes; `../dl-report-final.pdf` written.
+* **User revision (2026-11-18):** "planner beats LR" was a personal standard, not a course requirement. The paper no
+  longer contains the planner-vs-LR comparison/decision rule, the end-to-end ablations (no feedback / no tool / LR
+  ranking) or the post-hoc identifier-quality section; the planner is reported against a random ranking plus the
+  descriptive candidate rows, end to end against the all-files parsers. Those analyses remain in
+  `docs/PREREGISTRATION.md` and the REPORT.md files. Jev / Jev-MM keep their LR baselines. A copy of the paper
+  (tex + pdf) is in `paper/`.
 
 ### Status of the runs
 * **Planner (nested LOCO, section 1 of `docs/PREREGISTRATION.md`):** DONE. Report:

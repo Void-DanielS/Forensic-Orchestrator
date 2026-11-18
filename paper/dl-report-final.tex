@@ -1,0 +1,685 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{newtxtext,newtxmath}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+\usepackage{cite}
+\usepackage[hidelinks]{hyperref}
+\newcommand{\st}[1]{\textsc{#1}}
+
+\begin{document}
+
+\title{Learning Where to Look: Multimodal Deep Learning\\with Verified Outputs for Digital Forensic Triage}
+
+\author{
+\IEEEauthorblockN{Daniel Cabrera}
+\IEEEauthorblockA{\textit{Departamento de Ingeniería}\\
+\textit{Universidad del Pacífico}\\
+Lima, Perú\\
+ds.cabreral@alum.up.edu.pe}
+\and
+\IEEEauthorblockN{Fabrizzio Marin}
+\IEEEauthorblockA{\textit{Departamento de Ingeniería}\\
+\textit{Universidad del Pacífico}\\
+Lima, Perú\\
+sf.marinc@alum.up.edu.pe}
+\and
+\IEEEauthorblockN{Luis Moran}
+\IEEEauthorblockA{\textit{Departamento de Economía}\\
+\textit{Universidad del Pacífico}\\
+Lima, Perú\\
+l.moranl@alum.up.edu.pe}
+}
+
+\maketitle
+
+\begin{abstract}
+A forensic examiner facing a seized phone or disk must decide which of tens of thousands of files to read first,
+and any model that helps must never put an invented fact into a report. We train three deep-learning models on a
+corpus of 72 public forensic cases (162{,}793 files) and connect them in a triage pipeline whose outputs are checked
+by a deterministic verifier. \emph{Jev}, a byte-level CNN, identifies the file type of 512-byte fragments without
+their header (0.811 accuracy, 17 types). \emph{Jev-MM}, a transformer that fuses CLIP image features, container
+metadata and OCR text, predicts where an image came from without seeing its path (0.759 accuracy for a three-seed
+ensemble vs.\ 0.692 for logistic regression and 0.662 for the best single modality). The \emph{investigation
+planner}, a five-modality network trained on the answer keys of 16 solved cases, ranks the files of an unseen case
+so that the agents read the right ones first; it can use a relevance prior from a local LLM that we fine-tune with
+LoRA on 284 public forensic write-ups. Under a pre-registered nested leave-one-case-out protocol, the selected planner
+reaches 0.813 AUROC and 0.292 average precision on unseen cases (random ranking: 0.5 and 0.032), and its 100
+top-ranked files hold 75\,\% of a case's answer items. Three model-driven agents (planner, LLM analyst, image agent)
+orchestrated around a blackboard of verified leads recover 136 of 869 answer-key identifiers reading 100 files per
+case, about as many as deterministic parsers that read every file (137); the verifier rejects 545 of 1{,}707 LLM
+quotes, so no hallucinated quote becomes evidence.
+\end{abstract}
+
+\begin{IEEEkeywords}
+multimodal learning, digital forensics, learning to rank, self-supervised learning, calibration, hallucination
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Digital investigations routinely involve several computers, phones and USB drives, each with tens of thousands of
+files, thousands of SQLite databases and hundreds of thousands of file-system timestamps \cite{garfinkel2010,quick2014}.
+Manual review has become the bottleneck of forensic laboratories. Deep learning offers two kinds of help: models that
+\emph{recognize} content (file types, image provenance, text in screenshots) and models that \emph{prioritize} it,
+telling the examiner where the answer to an investigation is likely to be. Large language and vision-language models
+\cite{llava,qwen25vl} add fluent descriptions, but they may also produce claims that their input does not support
+\cite{kalai2025}; in a forensic report a single invented timestamp can compromise the admissibility of the whole
+analysis.
+
+This paper treats forensics as the application domain of a deep-learning study. We ask three questions. (i) Can
+small models trained on public forensic data recognize evidence when the cues examiners rely on (headers, paths)
+are missing? (ii) Does multimodal fusion help, and when? (iii) Can a model learn, from solved cases, where to look in
+a new one, and can its output be used without risking hallucinated evidence? Our contributions are:
+\begin{itemize}
+\item \textbf{Datasets without manual labelling.} From a corpus of 108 registered public cases (72 ready, 162{,}793
+extracted files) we derive four datasets whose labels come from deterministic rules or published answer keys: 145{,}589
+file fragments, 12{,}532 images, 33{,}047 files with relevance labels from 16 solved cases, and 80{,}126 unlabelled
+files for self-supervised pretraining. All splits are by case.
+\item \textbf{Jev}, a 0.89\,M-parameter byte CNN with typed, calibrated heads (file type, disguise, position).
+\item \textbf{Jev-MM}, a multimodal transformer over pixels, metadata and OCR text that predicts image provenance
+without access to the file path, with a full modality ablation over three seeds.
+\item \textbf{An investigation planner} that ranks files by predicted relevance from five modalities, and a
+controlled study of multimodal fusion under severe case scarcity: plain fusion, self-supervised contrastive
+pretraining, metadata anchoring, wide-and-deep residual learning, data augmentation with synthetic positives,
+transfer learning from Jev, and noisy-student self-training.
+\item \textbf{A verified multi-agent pipeline}: the planner orchestrates an LLM analyst and an image agent in rounds;
+every statement carries machine-checkable citations and a deterministic engine re-reads the original evidence before
+anything is reported as evidence. Model outputs without citations are kept as labelled leads.
+\item \textbf{A pre-registered evaluation} reported as one benchmark table per task, including the negative results.
+\end{itemize}
+
+\section{Background}
+
+\textbf{Convolutional and transformer encoders.} One-dimensional CNNs over byte or character embeddings capture
+local patterns such as magic numbers, record structures and path components; global max and mean pooling make them
+length-independent. Transformers relate tokens through attention \cite{vaswani2017}; in multimodal fusion each
+modality is encoded into one or more tokens and a transformer encoder with a learned classification token
+(\texttt{CLS}) mixes them, while a key-padding mask removes absent modalities.
+
+\textbf{Pretrained encoders.} CLIP \cite{clip} learns image and text encoders by contrastive alignment of 400\,M
+image--caption pairs; its vision transformer gives transferable image features. Sentence encoders such as
+multilingual MPNet \cite{sbert} map text to fixed vectors. Contrastive objectives (InfoNCE \cite{oord2018}) can also
+align different \emph{views of the same object} without labels, which we use for self-supervised pretraining.
+
+\textbf{Calibration.} Neural classifiers are often over-confident; temperature scaling divides the logits by a
+scalar fitted on validation data and lowers the expected calibration error (ECE) \cite{guo2017}. Calibrated
+probabilities allow a model to abstain.
+
+\textbf{Multimodal imbalance.} A multimodal network can be worse than its best single-modality counterpart: the
+modalities learn at different speeds and the network overfits the easiest ones \cite{wang2020}. Remedies include
+per-modality losses, modality dropout and architectures that keep a strong unimodal path.
+
+\textbf{Hallucination and grounding.} A hallucination is generated content that is not supported by the input
+\cite{kalai2025,ji2023}. We ground model outputs by requiring each reported fact to cite a location in the original
+evidence that a deterministic program can re-read; cryptographic hashes (SHA-256) show that the cited file has not
+changed \cite{carrier2005}.
+
+\section{Related Work}
+
+\textbf{LLMs and agents in forensics.} Wickramasekara and Scanlon \cite{wickramasekara2024} propose four AutoGen agents
+backed by LLaMA and StarCoder to automate forensic phases, without an empirical evaluation; they list accuracy and
+hallucinations as open problems. Khatiwala \emph{et al.} \cite{khatiwala2026} use GPT-4 with a forensic knowledge
+graph and SHA-256 identifiers on one Samsung phone image, reaching 95.24\,\% artifact precision, but depend on a cloud
+model. ForensicLLM \cite{forensicllm} fine-tunes a 4-bit LLaMA-3.1-8B with retrieval-augmented fine-tuning and
+attributes sources correctly 86.6\,\% of the time; it answers questions about forensics rather than analysing case
+evidence. In contrast, our models are small, trained on case evidence, run locally, and their outputs are verified
+against the evidence at the level of content, not only file integrity.
+
+\textbf{Deep learning on forensic data.} File-fragment classification with CNNs over raw bytes is established
+\cite{mittal2021}; Jev follows this line and adds calibrated typed heads and a disguise detector. Guwor and Shabaz
+\cite{guwor2026} fuse MobileNetV2 visual features with EXIF-based features for forgery detection (83.85\,\% vs.\
+68.61\,\% visual-only and 75.85\,\% metadata-only), showing that pixels and metadata are complementary. Jev-MM fuses
+the same two modalities plus OCR text, with a transformer instead of stacked classifiers, for a different question
+(provenance rather than authenticity) and with case-level splits.
+
+\textbf{Learning with few labelled groups.} When labelled data are scarce, wide-and-deep models \cite{cheng2016}
+combine a linear model with a deep network trained jointly; residual gates initialised at zero (ReZero
+\cite{bachlechner2021}) start a network as the identity of its strongest path. Data augmentation and synthetic
+minority examples (SMOTE \cite{chawla2002}, mixup \cite{zhang2018}) enlarge the training set; noisy-student
+self-training \cite{xie2020} turns unlabelled data into soft labels. We evaluate all of these on the planner, where
+the independent unit is a case and only 16 are labelled.
+
+\section{Data}
+
+\subsection{Forensic Corpus}
+The corpus registers 108 public cases from NIST CFReDS, Digital Corpora, the DFRWS challenges, CTF competitions
+(Magnet, Magnet Virtual Summit, Cellebrite, NFI, DFIR Madness), the Ali Hadi challenges, the VTO drone program and
+the Hickman reference phones. A case groups the evidence items of one scenario, the brief given to examiners and,
+when published, the answer key. 72 cases are ready (at least one extracted item and a usable brief): 100 evidence
+items, 162{,}793 files (43.1\,GB), 2{,}813{,}350 file-system entries and 7{,}373 recovered deleted files, covering
+Android (40\,\% of files), Windows (25\,\%), iOS (17\,\%), Linux (10\,\%), removable media, drones, cloud exports,
+memory and network captures (Table~\ref{tab:data}). Disk images (E01, split RAW, LVM2, XFS, APFS) were opened with The
+Sleuth Kit and \texttt{dissect}; large archives were read by HTTP range requests, so only selected members were
+downloaded and each was checked by CRC-32. Every file's SHA-256 is recorded. Agents and models receive only the brief;
+answer keys are stored apart and used only for labels and scoring.
+
+\textbf{Integrity audit.} Because the corpus lived in a cloud-synchronized folder, we re-hashed all 162{,}793 files.
+51 had changed or disappeared (29 \texttt{desktop.ini} files rewritten by Windows, 17 SQLite \texttt{-shm} files
+rewritten, 5 missing). 39 were re-acquired from the original images with matching hashes, 22{,}395 at-risk files
+were made read-only, and 12 that sit in images compressed at the source were excluded. The same audit found that the
+fragment dataset builder had silently skipped 6{,}036 files with paths longer than 260 characters; the dataset was
+rebuilt and Jev retrained.
+
+\begin{table}[t]
+\caption{Datasets Derived from the Corpus (All Splits by Case)}
+\label{tab:data}
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{1.75cm}p{3.75cm}r@{}}
+\toprule
+\textbf{Dataset} & \textbf{Label source} & \textbf{Size} \\
+\midrule
+Fragments (Jev) & header signature of the file; extension rule; offset & 145{,}589 frag. \\
+Images (Jev-MM) & storage location (path rules); path never an input & 12{,}532 img. \\
+Planner & answer key of 16 solved cases (file named or identifier in bytes; 849 relevant) & 33{,}047 files \\
+Pretraining & none (50 cases without key) & 80{,}126 files \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Derived Datasets}
+\textbf{Fragments.} 512-byte, sector-aligned fragments from file \emph{bodies} (the first sector, which carries the
+signature that produced the label, is never used): 145{,}589 fragments from 46{,}557 distinct files, deduplicated by
+SHA-256 across splits. Labels: 17 file types; whether the file is disguised (content contradicts the extension);
+relative position in the file. Extensions are re-drawn from a shared pool during training so that the extension alone
+cannot reveal the type.
+
+\textbf{Images.} 12{,}532 decodable images from 57 cases (train / validation / test 9{,}914 / 808 / 1{,}810; at most
+400 per case and class). The label is the origin implied by where the device stored the image: camera
+(\texttt{DCIM}), screenshot, messaging media, user file, web cache, thumbnail or application asset; a second label
+says whether the image is user-generated. The path is never a model input, so the model must infer provenance from
+content, as for a carved or renamed image. 4{,}293 images carry OCR text.
+
+\textbf{Planner.} A file of a solved case is \emph{relevant} if the answer key names it or its bytes contain one of
+the key's identifiers (e-mail address, URL, domain, phone number, file name), found with an Aho--Corasick scan over
+ASCII and UTF-16 encodings. For two cases whose keys are narrative (MVS~2024, NGDC~2012) we transcribed distinctive
+solution tokens by hand, with their source. Result: 16 cases, 33{,}047 files, 849 relevant (2.6\,\%). Each held-out
+case also keeps its set of \emph{answer items} (identifiers and named files) for coverage metrics.
+
+\textbf{Pretraining.} The 50 ready cases without an answer key provide 80{,}126 unlabelled files after SHA-256
+deduplication; no labelled case is included.
+
+\section{Methods}
+
+\subsection{Jev: Byte-Level Fragment Model}\label{sec:jev}
+Each byte is embedded ($256\!\to\!64$) and passed through four Conv1d--BatchNorm--GELU blocks (kernels 9, 7, 5, 3,
+with max pooling) and mean$\|$max pooling into $z\in\mathbb{R}^{256}$ (0.89\,M parameters). Three typed heads read
+$z$: \emph{choice} (17 types), \emph{yes/no} (disguised; also reads a character embedding of the extension and the
+predicted type distribution) and \emph{score} (position, five ordinal bins). The loss is
+$\mathcal{L}=\mathrm{CE}_{\text{ls}=0.05}+0.5\,\mathrm{BCE}+0.3\,\mathrm{CE}_{\text{ord}}$; training uses AdamW, a
+one-cycle schedule, bf16 and class-balanced sampling ($w\propto n^{-1/2}$) for 20 epochs, with the epoch chosen on
+validation and a temperature fitted per head. Answers below 0.5 confidence abstain.
+
+\subsection{Jev-MM: Multimodal Image Provenance}\label{sec:jevmm}
+For an image $x$ the model receives three inputs taken from the file itself:
+\begin{itemize}
+\item \emph{Vision}: a $224\times224$ letterboxed thumbnail encoded by CLIP ViT-B/32 \cite{clip}; only the last
+transformer block is fine-tuned.
+\item \emph{Metadata}: 43 container features: format, geometry, size and bits per pixel, color mode, the EXIF tags
+present (make, model, GPS, capture time, software, UTC offset, exposure), the JPEG quality implied by the
+quantization table, chroma subsampling, ICC profile and PNG text chunks.
+\item \emph{Text}: EasyOCR text embedded by a frozen multilingual sentence encoder \cite{sbert}, plus nine
+statistics (boxes, confidence, text area, presence of a status-bar clock).
+\end{itemize}
+Each modality is projected to a token $h_m\in\mathbb{R}^{256}$; a learned $h_{\text{cls}}$ and the modality tokens
+(plus modality embeddings $e_m$) pass through a two-layer transformer encoder in which absent modalities are masked:
+\begin{equation}
+z = \mathrm{Enc}\big([h_{\text{cls}};\, h_v+e_v;\, h_m+e_m;\, h_t+e_t],\ \text{mask}\big)_{\text{cls}},
+\end{equation}
+\begin{equation}
+p(\text{orig.}\mid x)=\mathrm{softmax}(W_o z / T_o),\ \ p(\text{user}\mid x)=\sigma(w_u^\top z / T_u).
+\end{equation}
+The loss is label-smoothed cross-entropy plus $0.5\times$ BCE; each modality is dropped with probability 0.25 during
+training so the model answers with whatever is available. Training: AdamW, one-cycle, bf16, class-balanced sampling,
+12 epochs (9.8\,M trainable of 90.2\,M parameters). The number of fine-tuned ViT blocks (0/1/2) and its learning rate
+were chosen on validation only. Temperatures $T_o,T_u$ are fitted on validation \cite{guo2017}.
+
+\subsection{Investigation Planner}\label{sec:planner}
+For each file $f$ of a case $C$ the planner predicts $p(\text{relevant}\mid f, C)$ from five modalities, each encoded
+into one 192-dimensional token:
+\begin{itemize}
+\item \emph{path}: the last 160 characters, right-aligned so the file name is always at the end (character CNN);
+\item \emph{header}: the first 256 bytes (byte CNN);
+\item \emph{metadata}: a 47-dimensional vector: log size, depth, category, platform, deleted and hidden flags, MACB
+timestamps as within-case percentiles (MLP);
+\item \emph{content}: printable strings of the first 64\,KB embedded by the sentence encoder (MLP);
+\item \emph{context}: the case brief, same encoder (MLP).
+\end{itemize}
+A two-layer transformer (four heads) fuses $[\text{CLS};\text{tokens}]$ and a linear head gives the logit. Training
+uses binary cross-entropy with case-balanced sampling (each case contributes equally, half of its draws positive),
+modality dropout 0.15, AdamW and a one-cycle schedule for 10 epochs of 150 steps.
+
+Because the independent unit is the case and only 16 are labelled, plain fusion is at risk of fitting case-specific
+cues (one case's URLs or folder names). We study the following remedies, all evaluated under the same protocol.
+
+\textbf{Self-supervised encoders.} The four file encoders are pretrained on the 80{,}126 unlabelled files with a
+symmetric InfoNCE loss over the six modality pairs: the views of one file (path, header, metadata, content) must
+identify each other among the 512 files of a batch, as in CLIP but between modalities of one file. On six held-out
+unlabelled cases the encoders retrieve the matching view with 10--35\,\% top-1 accuracy (chance 0.2\,\%). The
+planner loads them frozen or fine-tuned at $0.1\times$ the learning rate.
+
+\textbf{Metadata anchoring.} The logit is $a(t_m)+g\,h(z_{\text{cls}})$, where $t_m$ is the metadata token before
+fusion, $a$ and $h$ are linear heads and $g$ is a scalar gate initialised at zero \cite{bachlechner2021}; an auxiliary
+BCE trains $a$ alone. The network starts as a metadata model and fusion can only add a correction.
+
+\textbf{Wide and deep.} The anchor is replaced by the linear model itself \cite{cheng2016}: the logit is
+$w^\top m + b + g\,h(z_{\text{cls}})$, where $(w,b)$ is the L2-regularized logistic regression on the raw metadata
+vector $m$, fitted on the fold's non-test cases and frozen, and the deep fusion learns a gated residual on the training
+cases. Epoch~0 ($g=0$, the linear model alone) is a candidate in the validation-based epoch choice, so the deep part is
+kept only if it improves validation ranking.
+
+\textbf{Augmentation and synthetic positives.} Per batch: random prefix crop of the path and 3\,\% character
+substitutions outside the file name; 2\,\% byte noise after the 16-byte signature; Gaussian jitter on the continuous
+metadata columns; dropout and noise on the content embedding; and SMOTE-style synthetic positives \cite{chawla2002}:
+half of the positives get metadata and content interpolated towards another positive,
+$\lambda\sim\mathcal{U}(0.5,1)$.
+
+\textbf{Transfer learning.} The header encoder is replaced by the convolutional trunk of Jev (trained on 145k
+fragments) and fine-tuned at $0.1\times$ the learning rate.
+
+\textbf{Noisy-student self-training.} An anchored teacher trained on the labelled training cases scores the 80{,}126
+unlabelled files; the student is trained on the labelled batch plus a half batch of unlabelled files with the
+teacher's soft labels (weight 0.5) under augmentation \cite{xie2020}.
+
+\textbf{LLM relevance prior.} A local LLM (Qwen2.5-VL-3B, text only \cite{qwen25vl}) sees the case brief and, for one
+file, its path, category, size and a 500-character text excerpt, and is asked whether the file is likely to answer the
+investigation. Its prior is $L=\log P(\text{Yes})-\log P(\text{No})$ from one forward pass (fp32 logits of the two
+answer tokens, no generation). In the wide part, $m$ is extended with $L/10$ and $L$ standardised within the case (no
+labels are used). The prior comes in two versions with the same prompt. \emph{Zero-shot}: the LLM as released.
+\emph{Fine-tuned}: the same LLM after LoRA fine-tuning \cite{hu2022lora} on public write-ups of other forensic
+challenges, so that it learns from examiners' own accounts where they looked and which tools they used. We collected
+284 English Markdown write-ups (CTF and training labs: Windows triage images, memory, logs, e-mail, mobile) and kept each
+as one plain-text pair, \emph{case context} (the scenario before the first question) $\rightarrow$ \emph{solution}
+(the rest), with no annotation. The solution text was cleaned so that the examiner's actions dominate it: it is laid out
+as question $\rightarrow$ the examiner's own steps (which artifact was opened, with which tool, what was searched)
+$\rightarrow$ answer; questions answered without any step, links, images, page metadata, summaries and pasted tool
+output beyond eight lines were removed. A write-up was discarded if its raw page named any of our 16 labelled cases or
+contained any of their answer-key identifiers (108 discarded), or was not in English. Fine-tuning used a recipe fixed in advance: rank 16, $\alpha=32$,
+dropout 0.05 on all attention and MLP projections of the language model (30M trainable parameters), learning rate
+$10^{-4}$, one epoch, 1{,}024 tokens per example, loss on the solution tokens only. Since no labelled case is seen, one
+fine-tuned model serves every fold.
+
+\subsection{Verified Triage Pipeline}\label{sec:pipeline}
+Given a case, the planner ranks all files and the top $K$ are dispatched: images to an image-triage agent (Jev-MM)
+and, optionally, a locally run vision-language model (Qwen2.5-VL-3B in 4-bit NF4 \cite{qwen25vl,qlora}); other files
+to a reader agent that reports e-mail addresses and URLs. Every statement is a \emph{finding} with a set of citations
+$C_f$; each citation gives the file, its expected SHA-256 $h_c$, a locator (byte offset, line, read-only SQL query,
+regular expression, EXIF tag, registry value or event-log record) and the expected snippet. A deterministic engine,
+with its own file access and hash cache, recomputes the hash, runs the locator on the original file and compares the
+result. Its status is
+\begin{equation}
+\mathrm{st}(f) =
+\begin{cases}
+\st{Uncorroborated}, & C_f = \emptyset,\\
+\st{Verified}, & \bigwedge_{c \in C_f} v(c) \wedge \kappa(f),\\
+\st{Rejected}, & \text{otherwise},
+\end{cases}
+\label{eq:status}
+\end{equation}
+where $v(c)$ is the outcome of re-running citation $c$. For text read by a model (OCR or VLM), $\kappa$ requires a
+fuzzy match against a database cell or text line of the case: with $M(a,b)$ the matching-block length of
+Ratcliff--Obershelp \cite{ratcliff1988}, $\kappa = (|a|\ge 10) \wedge (M/|a| \ge 0.85) \wedge (|a|\ge 25 \vee M/|b|\ge
+0.5)$; otherwise $\kappa=1$. Only \st{Verified} findings enter the evidence sections of a report. Outputs of Jev and
+Jev-MM carry no citations and are therefore always \st{Uncorroborated} leads: the models prioritize, the verifier
+decides. The evidence is never written; SQLite files are queried on hash-keyed copies.
+
+\subsection{Orchestrated Multi-Agent Investigation}\label{sec:orch}
+The pipeline above reads the top $K$ files once. The orchestrated system replaces it with three model-driven agents
+that work in rounds around a shared \emph{blackboard} of verified leads (Fig.~\ref{fig:orch}).
+
+\textbf{Orchestrator.} The planner ranks every file of the case. In round $r$ it dispatches the next $B$ files (here
+$B=25$, $K=100$, so four rounds): non-image files to the analyst agent, images to the image agent. From round 2 on,
+files are re-ranked with the leads $L$ the agents have verified so far:
+\begin{equation}
+s_i = \operatorname{logit}(p_i) + \beta \log\bigl(1 + |\{\ell \in L : \ell \text{ occurs in file } i\}|\bigr),
+\label{eq:rerank}
+\end{equation}
+where occurrence is tested on the text snippet of the file's index entry and $\beta=2$ is fixed a priori (never tuned
+on a case). Read files never return.
+
+\textbf{Analyst agent.} A local instruction-following LLM (Qwen2.5-VL-3B used text-only \cite{qwen25vl}) reads up to
+3{,}500 characters of each file, taking windows around current leads first, together with the case brief and the
+leads on the blackboard. It answers in JSON with up to six \emph{verbatim} quotes (typed as person, account, message,
+location, \ldots) and new leads. Each quote is searched in the file's bytes (UTF-8, UTF-16LE, then case-insensitive);
+when found, the finding cites the byte offset and the claim is written from the file's own bytes, never from the
+model's text. When it is not found, the finding cites the model's quote anyway, so the engine \st{Rejects} it: a
+hallucination caught and counted. A lead enters the blackboard only if it occurs inside a verified quote. The analyst
+also calls a deterministic identifier-extraction tool (e-mail addresses, URLs).
+
+\textbf{Image agent.} Jev-MM triages every dispatched image; the vision-language model reads the three images per
+round most likely to be user-generated. Text read from an image becomes evidence and a lead only when the engine
+corroborates it against a case artifact ($\kappa$ above).
+
+\begin{figure}[t]
+\centering
+\small
+\setlength{\fboxsep}{3pt}
+\fbox{\parbox{0.92\columnwidth}{\centering
+Planner (orchestrator): rank all files $\rightarrow$ pick next $B$ by Eq.~\eqref{eq:rerank}\\[2pt]
+$\downarrow$ text files \hspace{6em} $\downarrow$ images\\[2pt]
+Analyst LLM (quotes, leads) \hspace{1em} Jev-MM $\rightarrow$ VLM (top 3)\\[2pt]
+$\downarrow$ \hspace{10em} $\downarrow$\\[2pt]
+Verification engine (re-reads evidence bytes)\\[2pt]
+$\downarrow$ \textsc{Verified} only\\[2pt]
+Blackboard of leads $\rightarrow$ next round}}
+\caption{Orchestrated investigation. Only verified statements reach the blackboard or the report.}
+\label{fig:orch}
+\end{figure}
+
+\section{Experimental Setup}
+\textbf{Jev and Jev-MM.} Fixed case-level splits shared by both models (4 validation and 4 test cases: two Android and two iOS reference phones, two Windows scenarios and two CTF images, so every platform family is represented). Jev-MM and
+each modality subset are trained with seeds 13, 14 and 15 and reported as mean $\pm$ std on the test cases; the
+deployed checkpoint is additionally evaluated with modalities withheld at inference. Baselines: majority class,
+logistic regression on the byte histogram (Jev), extension-only and rule-based disguise detectors.
+
+\textbf{Planner (pre-registered).} The protocol and the candidates were written down and committed before any of
+the numbers below were computed; one later addition (the fine-tuned prior) was registered before any
+held-out number was read. Earlier exploratory runs had compared many variants on the held-out cases themselves; they
+informed the candidate list and are not reported as evidence. Leave-one-case-out (LOCO): each labelled case $t$ is
+held out once and the other 15 form its pool. \emph{Nested selection}: every pool case with at least 10 relevant
+files serves in turn as inner-validation case $v$; each candidate (metadata only, anchored, wide and deep, wide and
+deep with augmentation, and wide and deep with the zero-shot or the fine-tuned LLM prior) is trained on pool$\,-\,v$
+with seeds 13, 14 and 15 for 10 epochs, and the linear part of wide and deep is fitted on pool$\,-\,v$ only. The
+(candidate, epoch) with the highest mean inner-validation AP is selected, and the final model of fold $t$ is the
+mean-logit ensemble of all its inner models at that epoch. This one final model per fold is the planner we report
+and deploy; per-candidate numbers are descriptive. Metrics are computed on the 13 held-out cases where ranking is
+meaningful (at least 50 files and not all relevant), each case counting once: average precision (AP, primary), AUROC
+and coverage@$K$, the share of the case's answer items in its $K$ top-ranked files. A random ranking has AUROC 0.5
+and expected AP equal to the share of relevant files (0.032 on average over the 13 cases). \emph{Secondary metric}:
+the same scores restricted to user-level files, i.e., excluding containers (file-system metadata, memory images,
+network captures, raw disk and NAND images, paging files and unallocated space). The primary labels favour
+containers: a container or a large database contains answer-key bytes almost by construction, and its size and
+category are enough to rank it high.
+
+\textbf{End to end (pre-registered).} Each solved case is investigated by the planner fold that never saw it, reading
+at most $K=100$ files ($K$ was fixed from the timing of one case, before any comparison). The metric is the number of
+answer-key identifiers that appear in \st{Verified} findings, counted separately by source: verbatim LLM quotes, the
+deterministic extraction tool, the image agent, and their union. Cases without automatic answer-key identifiers are
+excluded: MVS 2024 and NGDC 2012 (labelled only through curated tokens) and DFRWS 2017 (no identifiers). The system
+uses $K=100$, $B=25$, the unquantised LLM and a GPU used by nothing else. One run stopped on a GPU out-of-memory error
+and was resumed with the same configuration (allocator setting only). As a reference, three deterministic parsers
+(application databases, file system, Windows artifacts) read every file of every case.
+
+\textbf{Hardware.} One laptop with an NVIDIA RTX 5080 Laptop GPU (16\,GB, capped at 12\,GB in software) and 32\,GB
+RAM; no data leave the machine.
+
+\section{Results}
+
+\subsection{Jev}
+On the test cases Jev identifies the type of a headerless 512-byte fragment with 0.811 accuracy and 0.658 macro-F1,
+against 0.630 / 0.470 for logistic regression on the byte histogram and 0.241 for the majority class. Calibrated, it
+answers 91\,\% of fragments with 85\,\% accuracy. Structured formats are recognized well (event logs F1 0.94, text
+0.95, registry hives 0.93, LNK 0.86, JPEG 0.84); compressed bodies (MP4, ZIP, GIF) are near-random bytes and remain
+hard (F1 0.03--0.38). The disguise head reaches 0.979 AUROC with re-drawn extensions, but 0.758 on real extensions,
+where disguised files are rare (103 of 9{,}591; precision about 5\,\% at 0.5). An early version reached 0.97 AUROC
+from the extension alone; the shared extension pool removed that shortcut, and the extension-only baseline remains in
+the evaluation as a check.
+
+\begin{table}[t]
+\caption{Image Provenance Benchmark on the Held-Out Test Cases (Mean $\pm$ Std over 3 Seeds; LR = Logistic Regression)}
+\label{tab:jevmm}
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Model} & \textbf{Accuracy} & \textbf{Macro-F1} & \textbf{User AUC} \\
+\midrule
+Vision only & $0.662 \pm 0.010$ & $0.423 \pm 0.012$ & $0.850 \pm 0.014$ \\
+Metadata only & $0.655 \pm 0.035$ & $0.480 \pm 0.056$ & $\mathbf{0.909 \pm 0.025}$ \\
+Text only & $0.502 \pm 0.017$ & $0.225 \pm 0.021$ & $0.611 \pm 0.009$ \\
+Vision + metadata & $0.724 \pm 0.006$ & $0.520 \pm 0.007$ & $0.878 \pm 0.005$ \\
+All three (Jev-MM) & $0.744 \pm 0.015$ & $0.533 \pm 0.015$ & $0.899 \pm 0.003$ \\
+\textbf{Ensemble (3 seeds)} & $\mathbf{0.759}$ & $\mathbf{0.553}$ & $0.911$ \\
+\midrule
+LR, metadata & $0.655$ & $0.488$ & $\mathbf{0.915}$ \\
+LR, metadata + text & $0.692$ & $0.489$ & $0.893$ \\
+Majority class & $0.450$ & -- & $0.500$ \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{One Jev-MM model, modalities withheld at inference}} \\
+None withheld & 0.733 & 0.519 & 0.900 \\
+Text & 0.735 & 0.543 & 0.888 \\
+Metadata (no EXIF) & 0.647 & 0.396 & 0.847 \\
+Vision & 0.697 & 0.515 & 0.916 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Jev-MM}
+Table~\ref{tab:jevmm} shows that fusing the three modalities gives the best provenance classifier, 8 accuracy points
+above the best single modality, and the most stable one across seeds (metadata alone varies by $\pm0.056$ macro-F1).
+Vision and metadata are complementary: EXIF, JPEG tables and sizes identify camera photos and thumbnails, pixels
+identify application assets and web images, and the attention of the fusion token follows this (0.60 on metadata for
+camera photos, 0.76 on vision for application assets). Text adds little on average because most images carry none,
+and withholding it costs nothing, which is the intended effect of modality dropout; stripping EXIF costs 9 points.
+For the binary user-generated question, metadata alone is as good as fusion, and logistic regression on metadata is
+the best model (AUROC 0.915). Temperature scaling lowers the ECE from 0.119 to 0.065; the single model answers 90\,\%
+of test images with 78\,\% accuracy. Against logistic regression, chosen with its L2 penalty on validation, deep
+fusion clearly wins on the 7-class task: $+0.067$ accuracy and $+0.064$ macro-F1 for the ensemble over the best
+linear model. Three training recipes fixed in advance (original; full class balance; 20 epochs) were compared on
+validation by the seed ensemble; the original recipe won, and its 3-seed ensemble (mean logits) was tested once
+and deployed. Per-class F1 of the ensemble: camera 0.87, application asset 0.88, thumbnail 0.78, web cache 0.66,
+screenshot 0.34, user file 0.19, messaging 0.15. The weak classes are those whose label is not visible in the image
+(a Downloads folder) or that have few training examples (106 messaging images).
+
+\subsection{Investigation Planner (Pre-Registered)}
+\textbf{Final model.} On the 13 rankable held-out cases the pre-registered final model reaches 0.813 AUROC and 0.292
+AP (Table~\ref{tab:planner}), nine times the AP of a random ranking (0.032). Its 10, 50 and 100 top-ranked files hold
+41\,\%, 65\,\% and 75\,\% of a case's answer items, while 100 files are on average 4\,\% of a case. Per-case AP varies
+widely (from 0.45 on M57 Patents and 0.42 on NIST Data Leakage to near zero on cases with one or two relevant files),
+which is expected from 13 independent cases. On the secondary metric (user-level files only, 11 rankable cases) it
+reaches 0.803 AUROC and 0.213 AP.
+
+\textbf{What selection chose.} In 12 of 13 folds the nested selection chose wide and deep with the zero-shot LLM prior,
+in one (DFRWS 2018) the fine-tuned prior, and always at epoch 0, i.e., the wide part plus the LLM prior with the deep
+residual at its initial value: on inner validation, the LLM prior was worth more than further training of the fusion
+network.
+
+\textbf{Benchmark.} The other rows of Table~\ref{tab:planner} give each candidate at the epoch with its own best
+inner-validation AP. They are selected without looking at the held-out case but are descriptive only. The metadata
+MLP has the highest held-out AP (0.350) and anchored fusion the best coverage@10 (0.537); the LLM prior gives the
+highest AUROC (0.815). Inner validation preferred the prior, so the deployed planner optimises global ordering more
+than the very top of the list.
+
+\textbf{Fine-tuned prior.} LoRA fine-tuning on 256 write-ups lowered the loss on 28 held-out write-ups from 2.531 to
+2.320 (perplexity 12.57 $\rightarrow$ 10.18): the LLM learned the language of examiners' solutions. As a relevance
+prior it behaves like the zero-shot one (AP 0.294 vs.\ 0.291, AUROC 0.806 vs.\ 0.815).
+
+\begin{table}[t]
+\caption{Evidence Ranking Benchmark: 13 Held-Out Cases (LOCO)}
+\label{tab:planner}
+\centering
+\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Model} & \textbf{AUROC} & \textbf{AP} & \textbf{c@10} & \textbf{c@50} & \textbf{c@100} \\
+\midrule
+\textbf{Final (nested selection)} & \textbf{0.813} & 0.292 & 0.409 & 0.652 & 0.747 \\
+Random ranking & 0.500 & 0.032 & -- & -- & -- \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Descriptive: each candidate at its inner-val.\ best epoch}} \\
+Metadata MLP & 0.767 & \textbf{0.350} & 0.496 & 0.686 & 0.746 \\
+Anchored & 0.764 & 0.326 & \textbf{0.537} & \textbf{0.699} & 0.737 \\
+Wide \& deep & 0.756 & 0.298 & 0.440 & 0.697 & \textbf{0.791} \\
+\ + augmentation & 0.766 & 0.301 & 0.487 & 0.660 & 0.755 \\
+\ + LLM prior & 0.815 & 0.291 & 0.420 & 0.652 & 0.747 \\
+\ + tuned prior & 0.806 & 0.294 & 0.450 & 0.663 & 0.724 \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Secondary: user-level files only (11 cases)}} \\
+Final (nested selection) & 0.803 & 0.213 & 0.305 & 0.602 & 0.648 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Orchestrated Agents End to End}
+On the 13 cases with automatic identifiers (869 identifiers), reading 100 files per case, the verified findings of
+the orchestrated system contain 136 identifiers (15.7\,\%) and at least one in 7 cases (Table~\ref{tab:e2e}); three
+deterministic parsers that read \emph{every} file of every case found 137 in 4 cases. Most identifiers enter through
+the analyst's extraction tool (132); verified LLM quotes contribute 21, among them typed facts (persons, accounts,
+messages) that the tool does not extract. The image agent contributes no identifier, as expected: identifiers are
+text, and its role is triage. The verifier rejected 545 of the 1{,}707 quotes of the analyst (32\,\%): these are
+hallucinated or paraphrased quotes, and none of them became evidence. The final system, run with the improved Jev-MM
+ensemble, gives the same numbers case by case. In a vision proof of concept on a Pixel~3 (58 images), GPS
+coordinates were re-checked against EXIF and a screenshot reading ``Super Secret Message'' was tied to a launcher
+database row through a read-only SQL citation (40 verified, 0 rejected, 244 uncorroborated descriptions; peak GPU
+memory 6.5\,GB).
+
+\begin{table}[t]
+\caption{End to End: Answer-Key Identifiers in Verified Findings (13 Cases, 869 Identifiers)}
+\label{tab:e2e}
+\centering
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+& \textbf{Agents} & \textbf{Parsers} \\
+& \textbf{(top 100 files)} & \textbf{(all files)} \\
+\midrule
+Identifiers, verified LLM quotes & 21 & -- \\
+Identifiers, extraction tool & 132 & -- \\
+Identifiers, image agent & 0 & -- \\
+Identifiers, union & 136 & 137 \\
+Cases with at least one & \textbf{7} & 4 \\
+Files read per case & $\le$ 100 & all \\
+LLM quotes rejected by the verifier & 545 / 1{,}707 & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+The two multimodal models give different answers to the question ``does fusion help?'', and the difference is
+instructive. For images, thousands of independent examples from 57 cases let the transformer learn complementary
+cues, and fusion wins directly. For the planner, the independent unit is the case: with 15 training cases per fold,
+the high-capacity path and content encoders memorise case-specific cues that do not transfer, the modality-imbalance
+failure described by Wang \emph{et al.} \cite{wang2020}. Remedies that \emph{protect the strongest modality}
+(anchoring, wide and deep) helped more than those that only add data or regularise the encoders, and under honest
+selection on inner validation the strongest addition was not more fusion training but the LLM prior, which improves
+the global ordering of files. Fine-tuning the LLM on write-ups made it a better model of examiners' text but not a
+better relevance prior. With 16 labelled cases, per-case AP varies more than the differences between candidates, so
+more labelled cases are the most direct way to improve the planner.
+
+End to end, the agents read at most 100 files per case and reach as many identifiers as parsers that read every
+file, in more cases. What the verifier adds is safety: about three in ten LLM quotes were not in the file, and each one
+was rejected.
+
+The verifier is what makes these models usable in a forensic setting. None of the trained models writes evidence:
+Jev and Jev-MM produce calibrated, labelled leads, the planner only decides reading order, and every statement that
+reaches the evidence sections was re-read from the original file by a program that shares nothing with the model. A
+model error cannot silently become evidence.
+
+\section{Limitations}
+First, the labels are proxies: storage location for Jev-MM and automatically extracted answer-key identifiers for
+the planner and the end-to-end metric, not examiner judgments; a file that the key does not mention may still be
+relevant. Second, only 16 cases have usable answer keys, so planner estimates have wide confidence intervals and the
+LOCO protocol is the only honest option. Third, verification shows that a cited value exists in the evidence, not
+that its interpretation is correct. Fourth, the extraction tool covers only e-mail addresses and URLs; memory images,
+network captures and drone flight logs have no model or parser. The base LLM may have seen write-ups of the dataset
+cases during pre-training, which we cannot control. Fifth, GPU attention kernels are not fully deterministic, so
+single runs vary; we report three seeds throughout. Finally, the corpus integrity audit showed that
+cloud-synchronized storage alters evidence; court-style use requires a local, non-synchronized evidence store.
+
+\section{Conclusion}
+We trained three deep-learning models on public forensic cases and combined them in a multi-agent pipeline whose
+outputs are verified against the original evidence. Where examples are plentiful, deep learning wins clearly: a byte
+CNN recognizes headerless fragments (0.811 vs.\ 0.630 accuracy for a histogram baseline) and a multimodal transformer
+recognizes image provenance better than any single modality (0.759 accuracy). The investigation planner, learned from
+16 solved cases, ranks an unseen case so that its 100 top files hold three quarters of the answer items, and the
+orchestrated agents reading those files recover as many identifiers as parsers that read everything, while the
+verifier keeps every hallucinated LLM quote out of the evidence. Future work: train the planner for the top of the
+list with a pairwise or listwise loss, since AP is the metric; use the fine-tuned LLM directly as the ranker and
+inside the analyst agent, where its knowledge of which artifacts and tools examiners use may matter more than as a
+prior; more labelled cases from public write-ups and examiner relevance judgments.
+
+\begin{thebibliography}{99}
+
+\bibitem{garfinkel2010} S. L. Garfinkel, ``Digital forensics research: The next 10 years,'' \emph{Digital
+Investigation}, vol. 7, pp. S64--S73, 2010.
+
+\bibitem{quick2014} D. Quick and K.-K. R. Choo, ``Impacts of increasing volume of digital forensic data: A survey
+and future research challenges,'' \emph{Digital Investigation}, vol. 11, no. 4, pp. 273--294, 2014.
+
+\bibitem{llava} H. Liu, C. Li, Q. Wu, and Y. J. Lee, ``Visual instruction tuning,'' in \emph{Advances in Neural
+Information Processing Systems}, vol. 36, 2023, pp. 34\,892--34\,916.
+
+\bibitem{qwen25vl} S. Bai \emph{et al.}, ``Qwen2.5-VL technical report,'' 2025.
+
+\bibitem{kalai2025} A. T. Kalai, O. Nachum, S. S. Vempala, and E. Zhang, ``Why language models hallucinate,''
+2025.
+
+\bibitem{carrier2005} B. Carrier, \emph{File System Forensic Analysis}. Boston, MA: Addison-Wesley, 2005.
+
+\bibitem{vaswani2017} A. Vaswani \emph{et al.}, ``Attention is all you need,'' in \emph{Advances in Neural
+Information Processing Systems}, 2017, pp. 5998--6008.
+
+\bibitem{qlora} T. Dettmers, A. Pagnoni, A. Holtzman, and L. Zettlemoyer, ``QLoRA: Efficient finetuning of
+quantized LLMs,'' in \emph{Advances in Neural Information Processing Systems}, 2023.
+
+\bibitem{hu2022lora} E. J. Hu \emph{et al.}, ``LoRA: Low-rank adaptation of large language models,'' in
+\emph{International Conference on Learning Representations}, 2022.
+
+\bibitem{ji2023} Z. Ji \emph{et al.}, ``Survey of hallucination in natural language generation,'' \emph{ACM
+Computing Surveys}, vol. 55, no. 12, pp. 1--38, 2023.
+
+\bibitem{wickramasekara2024} A. Wickramasekara and M. Scanlon, ``A framework for integrated digital forensic
+investigation employing AutoGen AI agents,'' in \emph{2024 12th International Symposium on Digital Forensics and
+Security (ISDFS)}. IEEE, 2024, pp. 1--6.
+
+\bibitem{khatiwala2026} J. P. Khatiwala, D. K. N. Addai, and W. Xu, ``Evaluating the reliability of digital
+forensic evidence discovered by large language model: A case study,'' \emph{arXiv preprint arXiv:2602.20202},
+2026.
+
+\bibitem{forensicllm} B. Sharma, J. Ghawaly, K. McCleary, A. M. Webb, and I. Baggili, ``ForensicLLM: A local large
+language model for digital forensics,'' \emph{Forensic Science International: Digital Investigation}, vol. 52, p.
+301872, 2025.
+
+\bibitem{guwor2026} B. Guwor and M. Shabaz, ``Multi-modal deep learning for image forgery detection: A synergistic
+fusion approach combining visual artifacts and metadata consistency analysis,'' \emph{Multimedia}, vol. 2, p. 11,
+2026.
+
+\bibitem{mittal2021} G. Mittal, P. Korus, and N. Memon, ``FiFTy: Large-scale file fragment type identification
+using convolutional neural networks,'' \emph{IEEE Transactions on Information Forensics and Security}, vol. 16, pp.
+28--41, 2021.
+
+\bibitem{clip} A. Radford \emph{et al.}, ``Learning transferable visual models from natural language supervision,''
+in \emph{Proceedings of the 38th International Conference on Machine Learning (ICML)}, 2021, pp. 8748--8763.
+
+\bibitem{sbert} N. Reimers and I. Gurevych, ``Making monolingual sentence embeddings multilingual using knowledge
+distillation,'' in \emph{Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing
+(EMNLP)}, 2020, pp. 4512--4525.
+
+\bibitem{oord2018} A. van den Oord, Y. Li, and O. Vinyals, ``Representation learning with contrastive predictive
+coding,'' \emph{arXiv preprint arXiv:1807.03748}, 2018.
+
+\bibitem{guo2017} C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, ``On calibration of modern neural networks,'' in
+\emph{Proceedings of the 34th International Conference on Machine Learning (ICML)}, 2017, pp. 1321--1330.
+
+\bibitem{wang2020} W. Wang, D. Tran, and M. Feiszli, ``What makes training multi-modal classification networks
+hard?'' in \emph{Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)}, 2020,
+pp. 12695--12705.
+
+\bibitem{cheng2016} H.-T. Cheng \emph{et al.}, ``Wide \& deep learning for recommender systems,'' in
+\emph{Proceedings of the 1st Workshop on Deep Learning for Recommender Systems (DLRS)}, 2016, pp. 7--10.
+
+\bibitem{bachlechner2021} T. Bachlechner, B. P. Majumder, H. Mao, G. Cottrell, and J. McAuley, ``ReZero is all you
+need: Fast convergence at large depth,'' in \emph{Proceedings of the 37th Conference on Uncertainty in Artificial
+Intelligence (UAI)}, 2021, pp. 1352--1361.
+
+\bibitem{chawla2002} N. V. Chawla, K. W. Bowyer, L. O. Hall, and W. P. Kegelmeyer, ``SMOTE: Synthetic minority
+over-sampling technique,'' \emph{Journal of Artificial Intelligence Research}, vol. 16, pp. 321--357, 2002.
+
+\bibitem{zhang2018} H. Zhang, M. Cisse, Y. N. Dauphin, and D. Lopez-Paz, ``mixup: Beyond empirical risk
+minimization,'' in \emph{International Conference on Learning Representations (ICLR)}, 2018.
+
+\bibitem{xie2020} Q. Xie, M.-T. Luong, E. Hovy, and Q. V. Le, ``Self-training with noisy student improves ImageNet
+classification,'' in \emph{Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR)}, 2020, pp. 10687--10698.
+
+\bibitem{ratcliff1988} J. W. Ratcliff and D. E. Metzener, ``Pattern matching: The gestalt approach,'' \emph{Dr.
+Dobb's Journal}, vol. 13, no. 7, p. 46, 1988.
+
+\end{thebibliography}
+
+\end{document}
