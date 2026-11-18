@@ -60,9 +60,13 @@ nothing (138 without); (4) the verifier rejects about a third of LLM quotes (hal
 identifiers (dfrws2005/09/16/17/18, dstl, vto_qysea partly): all hits come from lone_wolf, m57, nist_data_leakage,
 nist_hacking, nist_rhino, owl, vto_parrot. Post-hoc table on the informative cases: TO DO (benchmark section).
 
-**Final-system run** (`full`, improved Jev-MM, `data/outputs/ml/orchestrate/final_system_k100/`): 11/14 cases done
-before a second OOM (owl); resumed for owl + 2 VTO cases. First 11 cases identical to the pre-registered `full` row
-on those cases (lone_wolf 63, m57 4, nist_data_leakage 64, nist_hacking 2, nist_rhino 1).
+**Final-system run DONE** (`full`, improved Jev-MM, `data/outputs/ml/orchestrate/final_system_k100/REPORT.md`;
+one OOM resume at owl): **136 / 869 (15.7 %), 7/14 cases with a hit, 545 / 1707 LLM quotes rejected**, identical
+to the pre-registered `full` row case by case (the image model change does not affect text identifiers). This is the
+deliverable system's end-to-end number.
+
+**ALL RUNS ARE FINISHED. Nothing is running. Next session = writing only (benchmark tables, PREREGISTRATION notes,
+identifier-filter fix as post-hoc, paper).**
 
 ### Jev-MM (image model): DL clearly beats LR
 Test (case-level split): Jev-MM 0.744 acc / 0.533 macro-F1 / 0.899 user-gen. AUROC (mean of 3 seeds) vs logistic
