@@ -119,8 +119,10 @@ def evaluate_logits(lg: dict, y: np.ndarray, ug: np.ndarray, classes: list[str],
 # ---------------------------------------------------------------------------------------------- training
 def train_one(data: MMData, modalities: tuple[str, ...], epochs: int = 12, batch: int = 128, lr: float = 1e-3,
               vit_lr: float = 1e-5, seed: int = 13, device: str | None = None, progress: bool = True,
-              label: str = "all", unfreeze_blocks: int = 1, pretrained: bool = True
+              label: str = "all", unfreeze_blocks: int = 1, pretrained: bool = True, balance: float = 0.5
               ) -> tuple[JevMMNet, MMConfig, dict, list]:
+    """``balance``: class-balanced sampling exponent (weight = class count ** -balance; 0.5 is the original
+    recipe, 1.0 samples every class equally often)."""
     device = device or settings.device_for("vision")
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -139,7 +141,7 @@ def train_one(data: MMData, modalities: tuple[str, ...], epochs: int = 12, batch
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[g["lr"] for g in groups], total_steps=steps,
                                                 pct_start=0.1)
     cnt = np.bincount(data.y[tr], minlength=len(data.classes)).astype(float)
-    w = torch.tensor(cnt[data.y[tr]] ** -0.5)
+    w = torch.tensor(cnt[data.y[tr]] ** -balance)
     n_train = sum(p.numel() for p in net.parameters() if p.requires_grad)
     n_all = sum(p.numel() for p in net.parameters())
     if progress:
@@ -380,3 +382,136 @@ def write_report(run: Path, m: dict, histories: dict) -> Path:
     path = run / "REPORT.md"
     path.write_text("\n".join(md) + "\n", encoding="utf-8")
     return path
+
+
+# ---------------------------------------------------------------------------------------------- improvement
+# Fixed BEFORE running (2026-11-17): recipes compared on the VALIDATION cases only; the chosen recipe's seed
+# ensemble is tested once. Nothing is chosen on the test cases.
+RECIPES = {"original (12 ep, sqrt balance)": {"epochs": 12, "balance": 0.5},
+           "full class balance (12 ep)": {"epochs": 12, "balance": 1.0},
+           "longer (20 ep, sqrt balance)": {"epochs": 20, "balance": 0.5}}
+
+
+def _val_score(m: dict) -> float:
+    """The epoch-selection criterion of ``train_one`` (val macro-F1 + 0.25 user-generated AUROC)."""
+    return m["choice"]["macro_f1"] + 0.25 * (m["yes_no"]["auroc"] or 0)
+
+
+def logreg_baseline(data: MMData, device: str = "cpu") -> dict:
+    """Multinomial / binary L2 logistic regression on metadata and on metadata + text features (class-balanced,
+    standardised on train; the L2 strength chosen on validation macro-F1). Vision has no fixed feature vector, so
+    it is not included."""
+    tr, va, te = data.idx("train"), data.idx("val"), data.idx("test")
+    k = len(data.classes)
+
+    def fit(X, t, n_out, wd):
+        X = torch.tensor(X, dtype=torch.float32)
+        t = torch.tensor(t)
+        W = torch.zeros(X.shape[1], n_out, requires_grad=True)
+        b = torch.zeros(n_out, requires_grad=True)
+        cnt = torch.bincount(t[tr].long(), minlength=n_out).float() if n_out > 1 else None
+        cw = cnt.sum() / (n_out * cnt.clamp(min=1)) if n_out > 1 else None
+        opt = torch.optim.LBFGS([W, b], max_iter=300, line_search_fn="strong_wolfe")
+
+        def closure():
+            opt.zero_grad()
+            z = X[tr] @ W + b
+            loss = (F.cross_entropy(z, t[tr].long(), weight=cw) if n_out > 1
+                    else F.binary_cross_entropy_with_logits(z[:, 0], t[tr].float()))
+            loss = loss + wd * (W ** 2).sum()
+            loss.backward()
+            return loss
+
+        opt.step(closure)
+        with torch.no_grad():
+            return (X @ W + b).numpy()
+
+    out = {}
+    for name, X in {"metadata": data.meta, "metadata+text": np.concatenate([data.meta, data.text], 1)}.items():
+        X = np.nan_to_num(X.astype(np.float64))
+        X = (X - X[tr].mean(0)) / (X[tr].std(0) + 1e-6)
+        best = None
+        for wd in (1e-4, 1e-3, 1e-2):
+            z = fit(X, data.y, k, wd)
+            f = classification_metrics(data.y[va], z[va].argmax(1), data.classes)["macro_f1"]
+            if best is None or f > best[0]:
+                best = (f, wd, z)
+        f, wd, z = best
+        u = fit(X, data.ug, 1, wd)[:, 0]
+        m = classification_metrics(data.y[te], z[te].argmax(1), data.classes)
+        out[name] = {"l2": wd, "val_macro_f1": round(f, 4), "accuracy": m["accuracy"], "macro_f1": m["macro_f1"],
+                     "ug_auroc": auroc(data.ug[te].astype(int), u[te])}
+    return out
+
+
+def improve(dataset: Path | None = None, seeds: tuple[int, ...] = SEEDS, deploy: bool = True,
+            out_dir: Path | None = None) -> Path:
+    device = settings.device_for("vision")
+    data = MMData(dataset)
+    va, te = data.idx("val"), data.idx("test")
+    run = out_dir or settings.OUTPUTS_DIR / "ml" / "multimodal" / ("improve_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    run.mkdir(parents=True, exist_ok=True)
+    res: dict = {"recipes": {}, "seeds": list(seeds)}
+    kept = {}
+    for name, r in RECIPES.items():
+        nets, cfgs, vlogs, singles = [], [], [], []
+        for sd in seeds:
+            net, cfg, val, _ = train_one(data, MODALITIES, r["epochs"], seed=sd, device=device, label=f"{name}/{sd}",
+                                         unfreeze_blocks=DEFAULT_UNFREEZE, balance=r["balance"])
+            vlogs.append(predict(net, data, va, device))
+            singles.append(_val_score(evaluate_logits(vlogs[-1], data.y[va], data.ug[va], data.classes)))
+            nets.append(net.cpu())
+            cfgs.append(cfg)
+            torch.cuda.empty_cache()
+        ens = {k: np.mean([v[k] for v in vlogs], 0) for k in vlogs[0]}
+        ev = evaluate_logits(ens, data.y[va], data.ug[va], data.classes)
+        res["recipes"][name] = {**r, "val_single_mean": round(float(np.mean(singles)), 4),
+                                "val_ensemble": round(_val_score(ev), 4),
+                                "val_ensemble_macro_f1": ev["choice"]["macro_f1"],
+                                "val_ensemble_acc": ev["choice"]["accuracy"]}
+        kept[name] = (nets, cfgs, ens)
+        print(f"[mm improve] {name}: val score single {np.mean(singles):.4f} ensemble {_val_score(ev):.4f}", flush=True)
+    chosen = max(res["recipes"], key=lambda n: res["recipes"][n]["val_ensemble"])
+    nets, cfgs, ens = kept[chosen]
+    cfg = cfgs[0]
+    cfg.t_choice = fit_temperature(ens["choice"], data.y[va])
+    cfg.t_yes_no = fit_temperature(ens["yes_no"], data.ug[va], binary=True)
+    cfg.meta.update(ensemble=len(nets), recipe=chosen, seeds=list(seeds))
+    from src.ml.multimodal import JevMMEnsemble
+
+    model = JevMMEnsemble([n.to(device) for n in nets], cfg)
+    res["chosen"] = chosen
+    res["test"] = test_metrics(model, cfg, data, device, robustness=False)
+    res["test"]["test"]["choice"].pop("confusion", None)
+    res["logistic_regression"] = logreg_baseline(data)
+    ck = JevMM.save_ensemble(nets, cfg, run / "jev_mm_ensemble.pt")
+    if deploy:
+        dest = default_checkpoint()
+        if dest.exists():
+            shutil.copyfile(dest, dest.with_name("jev_mm_single_seed.pt"))
+        shutil.copyfile(ck, dest)
+        res["deployed"] = str(dest)
+    (run / "metrics.json").write_text(json.dumps(res, indent=2, default=str), encoding="utf-8")
+    t = res["test"]["test"]
+    md = ["# Jev-MM improvement: recipe chosen on validation, seed ensemble tested once\n",
+          f"Recipes fixed before running; {len(seeds)} seeds each; selection = validation macro-F1 + 0.25 user-gen. "
+          "AUROC of the seed ensemble (same criterion as the epoch choice). Test cases used once.\n",
+          "| recipe | val (mean single seed) | val (ensemble) | val ens. acc | val ens. macro-F1 |", "|---|---|---|---|---|"]
+    md += [f"| {n}{' **(chosen)**' if n == chosen else ''} | {v['val_single_mean']} | {v['val_ensemble']} | "
+           f"{v['val_ensemble_acc']} | {v['val_ensemble_macro_f1']} |" for n, v in res["recipes"].items()]
+    md += ["", "## Test cases\n", "| model | accuracy | macro-F1 | user-gen. AUROC |", "|---|---|---|---|",
+           f"| **Jev-MM ensemble ({chosen})** | {t['choice']['accuracy']:.3f} | {t['choice']['macro_f1']:.3f} | "
+           f"{t['yes_no']['auroc']} |",
+           "| Jev-MM single seed, original recipe (run 20261115_191432, mean of 3 seeds) | 0.744 | 0.533 | 0.899 |"]
+    md += [f"| logistic regression, {n} (L2 {v['l2']} on val) | {v['accuracy']:.3f} | {v['macro_f1']:.3f} | "
+           f"{v['ug_auroc']} |" for n, v in res["logistic_regression"].items()]
+    md += ["", "Per class F1 (test): " + ", ".join(f"{c} {v['f1']:.3f}" for c, v in t["choice"]["per_class"].items())]
+    (run / "REPORT.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    return run / "REPORT.md"
+
+
+if __name__ == "__main__":
+    import sys
+
+    if sys.argv[1:2] == ["improve"]:
+        print(improve().read_text(encoding="utf-8"))

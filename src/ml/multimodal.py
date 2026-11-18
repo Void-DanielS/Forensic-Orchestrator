@@ -174,6 +174,19 @@ class JevMMNet(nn.Module):
         return a / a.sum(1, keepdim=True).clamp(min=1e-9)
 
 
+class JevMMEnsemble(nn.Module):
+    """Seed ensemble of Jev-MM networks: the outputs are the mean of the members' logits (attention: mean map)."""
+
+    def __init__(self, members: list[JevMMNet], cfg: MMConfig):
+        super().__init__()
+        self.members = nn.ModuleList(members)
+        self.cfg = cfg
+
+    def forward(self, thumbs, meta, text, present, attn: bool = False) -> dict[str, torch.Tensor]:
+        outs = [m(thumbs, meta, text, present, attn=attn) for m in self.members]
+        return {k: torch.stack([o[k].float() for o in outs]).mean(0) for k in outs[0]}
+
+
 # ------------------------------------------------------------------------------------------------ query API
 def _softmax(z: np.ndarray) -> np.ndarray:
     z = z - z.max(-1, keepdims=True)
@@ -210,12 +223,28 @@ class JevMM:
             raise FileNotFoundError(f"no Jev-MM checkpoint at {path}; run `python main.py mm train` first")
         ck = torch.load(path, map_location="cpu", weights_only=False)
         cfg = MMConfig(**{**ck["config"], "modalities": tuple(ck["config"]["modalities"])})
-        net = JevMMNet(cfg)
-        missing, unexpected = net.load_state_dict(ck["state_dict"], strict=False)
-        bad = [k for k in missing if k not in net.frozen_prefix()]
-        if bad or unexpected:
-            raise ValueError(f"checkpoint does not match the model: missing {bad[:5]}, unexpected {unexpected[:5]}")
+        members = []
+        for sd in ck.get("members") or [ck["state_dict"]]:
+            net = JevMMNet(cfg)
+            missing, unexpected = net.load_state_dict(sd, strict=False)
+            bad = [k for k in missing if k not in net.frozen_prefix()]
+            if bad or unexpected:
+                raise ValueError(f"checkpoint does not match the model: missing {bad[:5]}, unexpected {unexpected[:5]}")
+            members.append(net)
+        net = members[0] if len(members) == 1 else JevMMEnsemble(members, cfg)
         return cls(net, device or settings.device_for("vision"))
+
+    @staticmethod
+    def save_ensemble(members: list[JevMMNet], cfg: MMConfig, path: Path) -> Path:
+        """Seed ensemble: one config (temperatures fitted on the averaged validation logits), the trained parameters
+        of every member."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        sds = []
+        for net in members:
+            frozen = net.frozen_prefix()
+            sds.append({k: v.detach().cpu() for k, v in net.state_dict().items() if k not in frozen})
+        torch.save({"config": asdict(cfg), "members": sds, "state_dict": sds[0], "clip": CLIP_NAME}, path)
+        return path
 
     # -------------------------------------------------------------------------------- inference
     @torch.no_grad()

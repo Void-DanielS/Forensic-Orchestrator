@@ -232,6 +232,23 @@ def test_short_training_learns_and_checkpoint_round_trips(tiny_ds, tmp_path, mon
     assert yn["query"] == "yes_no" and 0 <= yn["probability"] <= 1
 
 
+def test_seed_ensemble_round_trips_and_averages_logits(tmp_path):
+    from src.ml.multimodal import JevMMEnsemble
+
+    torch.manual_seed(0)
+    mods = ("metadata", "text")
+    a, b = _net(mods).eval(), _net(mods).eval()
+    cfg = a.cfg
+    me, tx = torch.randn(3, mmd.N_META), torch.randn(3, 768 + len(mmd.TEXT_STATS))
+    pr = torch.tensor([[1, 1, 1]] * 3, dtype=torch.bool)
+    want = (a(None, me, tx, pr)["choice"] + b(None, me, tx, pr)["choice"]) / 2
+    assert torch.allclose(JevMMEnsemble([a, b], cfg)(None, me, tx, pr)["choice"], want, atol=1e-5)
+    jev = JevMM.load(JevMM.save_ensemble([a, b], cfg, tmp_path / "ens.pt"), "cpu")
+    assert isinstance(jev.net, JevMMEnsemble) and len(jev.net.members) == 2
+    with torch.no_grad():
+        assert torch.allclose(jev.net(None, me, tx, pr)["choice"], want, atol=1e-5)
+
+
 def test_checkpoint_excludes_frozen_backbone(tmp_path):
     net = _net()
     ck = torch.load(JevMM.save(net, tmp_path / "x.pt"), weights_only=False)

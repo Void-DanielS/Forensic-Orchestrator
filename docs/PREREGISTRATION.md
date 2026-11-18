@@ -115,3 +115,13 @@ with knowledge of them; this is stated in the paper.
   * The leak filter is applied to the raw page, before cleaning, so it is stricter.
   * Result: 284 pairs (108 dropped by the identifier filter, 0 naming a case); 73 % of solution tokens fit in
     1,024 tokens.
+* 2026-11-17 (night), before training: **Jev-MM improvement** (image model; not part of sections 1-3). Three
+  recipes fixed in advance (`mm_train.RECIPES`: original; full class balance; 20 epochs), 3 seeds each (13, 14, 15).
+  The recipe whose **seed ensemble** (mean logits) has the best validation score (macro-F1 + 0.25 user-generated
+  AUROC, the existing epoch criterion) is chosen; temperatures are refitted on the validation ensemble; the test
+  cases are used once. A logistic-regression baseline (metadata; metadata + text; L2 chosen on validation) is
+  reported next to it. The ensemble is deployed only after the section 3 run has finished, so that run uses the
+  frozen original model throughout.
+* 2026-11-17 (night): after the section 3 run, one **final-system run** (`full` mode only, same K, nested planner
+  folds, improved Jev-MM) is made as the deliverable demonstration. It is reported separately and does not replace
+  the pre-registered section 3 comparison.
