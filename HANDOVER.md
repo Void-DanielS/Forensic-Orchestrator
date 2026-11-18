@@ -3,6 +3,73 @@
 _Last updated: 2026-11-17 (read §000 first: planner metrics are the open problem; orchestrated LLM agents built). Previous: 2026-11-16 (deep-learning focus: Jev-MM multimodal model, investigation planner + self-supervised encoders, DL pipeline, evidence repair).
 Read §0 first, then §1c / §1d. README.md is the full, peer-facing project report (results, metrics, limitations)._
 
+## 00000. 2026-11-17 night HANDOFF: pre-registered RESULTS + what to fix next (READ THIS FIRST)
+
+### Status of the runs
+* **Planner (nested LOCO, section 1 of `docs/PREREGISTRATION.md`):** DONE. Report:
+  `data/outputs/ml/planner/nested_20261117/REPORT.md` (also `data/outputs/planner_report.log`). Final models deployed
+  to `data/outputs/ml/planner/nested_20261117/models/<case>.pt`.
+* **Fine-tune (LoRA, tuned prior):** DONE. 284 write-up pairs (256 train / 28 held out), held-out loss
+  **2.531 -> 2.320**. Adapter + stats: `data/models/llm_prior_lora/` (`training.json`). Tuned prior:
+  `llm_prior_tuned.npz`. Candidate added to the nested run with `planner_nested extend`.
+* **Orchestration evaluation (section 3, K = 100, 4 systems):** started 22:13 by `scripts/after_nested.sh`
+  (background). Output `data/outputs/ml/orchestrate/eval_k100_final/results.json` (resumable: re-running the same
+  command skips finished `case|mode` keys) + `REPORT.md` written at the end; log `data/outputs/orchestrate_eval.log`.
+  If it did not finish, resume with:
+  `HF_HUB_OFFLINE=1 FORENSI_VLM_QUANT=none .venv/Scripts/python -W ignore -m src.eval.orchestrate_eval --planners
+  data/outputs/ml/planner/nested_20261117/models --out data/outputs/ml/orchestrate/eval_k100_final`
+  (nothing else on the GPU). Check first: `grep "\[orchestrate-eval\]" data/outputs/orchestrate_eval.log`.
+
+### Planner verdict (pre-registered, final; do NOT re-select on held-out cases)
+**Does NOT clearly beat logistic regression.** 13 rankable held-out cases:
+| | AUROC | AP | cov@10 | cov@50 | cov@100 |
+|---|---|---|---|---|---|
+| logistic regression | 0.767 | **0.301** | **0.440** | **0.708** | **0.782** |
+| final model (nested) | **0.813** | 0.292 | 0.409 | 0.652 | 0.747 |
+
+* Mean AP gain **-0.009**, 95 % CI [-0.074, +0.060], wins **7/13** -> 0 of 3 criteria met.
+* Secondary (user-level files only): gain -0.014, CI [-0.126, +0.087], wins 6/11.
+* Selection chose `wide & deep + LLM prior` on 12 folds, `+ tuned prior` on 1 (dfrws2018), **always epoch 0**
+  (= frozen LR + prior, no network training wins on inner validation).
+* Big wins m57_patents +0.25, mvs_2024 +0.19; big losses dfrws2017 -0.20, ngdc_2012 -0.17, nist_hacking -0.13.
+* Descriptive only (NOT a claim; looked at after the fact): `metadata` MLP alone AP 0.350, `anchored` 0.326.
+* Reading: the LLM prior improves global ordering (AUROC +0.05) but not the top of the list (AP, cov@10).
+
+### Orchestration: what was seen so far (partial, at 23:30)
+* Cases done: dfrws2005, dfrws2009, dfrws2016, dfrws2017, dfrws2018, dstl (partial): **union = 0 for every
+  system.** This is NOT a scoring bug (the 11:55 timing run of nist_data_leakage scored 47/250 with the same code).
+* **Cause: for these cases the automatic "answer-key identifiers" are junk**: Dropbox / Google Drive download URLs
+  and archive names from the case summary (`www dropbox com`, `dfrws2005 timeline txt`, `edge 7z`, ...). No agent
+  can or should find them in the evidence. dfrws2017 has **0** identifiers (evaluation `None`) and should have been
+  excluded like mvs_2024 / ngdc_2012.
+* The informative cases are the rest: lone_wolf, m57_patents, nist_data_leakage, nist_hacking_case,
+  nist_rhino_hunt, owl, vto_parrot_bluegrass, vto_qysea_fifish_p3.
+
+### TO FIX / DO next session (in order)
+1. **Read the orchestration results** (`eval_k100_final/REPORT.md`; regenerate with `orchestrate_eval report`
+   if missing). Report the by-source table honestly.
+2. **Record in `docs/PREREGISTRATION.md` (Decisions / Deviations, dated, results already known so say so):**
+   (a) dfrws2017 has no automatic identifiers -> excluded from section 3, same rule as mvs/ngdc; (b) cases whose
+   identifiers are only download URLs / archive names (dfrws2005/2009/2016/2018, dstl partly) are uninformative;
+   report the main table on all cases as pre-registered AND a clearly labelled post-hoc table on the informative
+   cases. Do not drop them silently.
+3. **Identifier filter (root cause, affects planner labels too):** `src/eval/scoring.key_entities` takes URLs /
+   download links / evidence archive names from the case summary. Add a filter (drop URLs, cloud-storage domains,
+   names of the evidence archives themselves). Any re-labelled planner run is a NEW, post-hoc analysis: label it so,
+   never replace the pre-registered numbers.
+4. **Paper `../dl-report-final.tex`:** fill `\PLANABSTRACT`, `\PLANNERRESULTS`, `\PLANDISCUSSION` with the verdict
+   above (negative result, stated plainly: no clear win; AUROC up, AP flat; selection always picks epoch 0),
+   the fine-tune held-out loss, the user-level metric, and the orchestration table + identifier-quality caveat.
+   Fix overfull hboxes. Compile: `%LOCALAPPDATA%/ForensiAgent/tools/tectonic.exe -X compile`.
+5. **Course requirement "one DL planner clearly beats LR" is NOT met under the protocol.** Options that stay
+   legitimate (all NEW pre-registrations, written before running): better labels (step 3) with the same rule;
+   train for top-of-list ranking (pairwise / listwise loss, since AP is the metric); use the tuned LLM more
+   directly (fine-tune it as the ranker on the planner rows, LOCO). Discuss with the user before spending GPU.
+6. Then the **agent part** (user: "the agent part is next"): use the fine-tuned model (it knows where to look /
+   which tools) inside the analyst agent.
+7. Commit: `scripts/after_nested.sh`, this HANDOVER, any report files (code zips for peers exclude HANDOVER.md,
+   PROJECT_REPORT.html and Claude/prompt files).
+
 ## 0000. 2026-11-17 (later): pre-registered protocol + fixes (read first)
 
 The user approved a protocol after a diagnosis. It is committed in `c91f4d6`: `docs/PREREGISTRATION.md` +
