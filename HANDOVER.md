@@ -5,6 +5,19 @@ Read §0 first, then §1c / §1d. README.md is the full, peer-facing project rep
 
 ## 00000. 2026-11-17 night HANDOFF: pre-registered RESULTS + what to fix next (READ THIS FIRST)
 
+**2026-11-18 (last session): DONE.** Items 1, 2, 4, 7 finished; item 3 done only as a post-hoc *table* (cases
+classified by listing their identifiers), the `key_entities` filter itself was NOT implemented (future work, like
+items 5-6).
+* `docs/PREREGISTRATION.md`: OOM-resume note + "Post-hoc notes on section 3" (dfrws2017 excluded, 7 uninformative
+  cases = dfrws2005/09/16/18, dstl, both VTO drones, 70 identifiers; post-hoc table on 6 informative cases, 799
+  identifiers: full 135, no feedback 137, no tool 25, LR 131, all 6/6 cases). Note: the earlier text below counted
+  vto_parrot/vto_qysea as informative; listing their identifiers shows only product/press URLs and the lab's phone.
+* `../dl-report-final.tex` (outside this repo): all `\PLAN*` placeholders replaced; new abstract; Jev-MM table now a
+  benchmark (ensemble + LR rows); new planner section + benchmark table (pre-registered / descriptive / user-level);
+  new end-to-end section + table by source (pre-registered 13 cases + post-hoc 6 cases); discussion, limitations,
+  conclusion (future work = identifier filter, listwise loss, LLM as ranker / inside analyst). Compiles with tectonic
+  with no overfull boxes; `../dl-report-final.pdf` written.
+
 ### Status of the runs
 * **Planner (nested LOCO, section 1 of `docs/PREREGISTRATION.md`):** DONE. Report:
   `data/outputs/ml/planner/nested_20261117/REPORT.md` (also `data/outputs/planner_report.log`). Final models deployed

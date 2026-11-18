@@ -125,3 +125,30 @@ with knowledge of them; this is stated in the paper.
 * 2026-11-17 (night): after the section 3 run, one **final-system run** (`full` mode only, same K, nested planner
   folds, improved Jev-MM) is made as the deliverable demonstration. It is reported separately and does not replace
   the pre-registered section 3 comparison.
+* 2026-11-18: the section 3 run hit CUDA out-of-memory at `owl|lr` (47 of 56 runs saved). It was resumed with the
+  same command plus `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (allocator setting only, no configuration
+  change); finished `case|mode` runs were skipped. The final-system run was resumed the same way at `owl`.
+
+## Post-hoc notes on section 3 (written 2026-11-18, AFTER all results were known)
+
+These notes were written after every section 3 number had been read. They do not change the pre-registered
+comparison, which is reported as run (all 14 cases, 869 identifiers).
+
+* **dfrws2017 has no automatic answer-key identifiers** (`key_entities` returns none; its evaluation is `None`). By
+  the rule of section 3 it should have been excluded like `mvs_2024` and `ngdc_2012`. It contributes 0 to every
+  numerator and denominator, so the totals are unaffected; the paper counts it as excluded (13 cases).
+* **Uninformative identifiers.** Listing the identifiers per case (done after the results) shows that in some cases
+  every automatic identifier comes from the answer-key document itself rather than from the evidence: download links
+  and their domains (`www.dropbox.com`, `drive.google.com`), names of the evidence archives (`dfrws2005-timeline.txt.zip`,
+  `Edge.7z`), tool and reference URLs, product pages and the lab's own contact number. Cases where this holds for
+  every identifier: dfrws2005, dfrws2009, dfrws2016, dfrws2018, dstl_ground_truth, vto_parrot_bluegrass,
+  vto_qysea_fifish_p3 (70 identifiers). No agent can or should find these in the evidence. (vto_parrot's one hit is
+  such an identifier found in an application file.)
+* **Post-hoc table** (clearly labelled as such in the paper, next to the main table): the six cases whose identifiers
+  include e-mail addresses, phone numbers or case file names (lone_wolf, m57_patents, nist_data_leakage,
+  nist_hacking_case, nist_rhino_hunt, owl; 799 identifiers). Union hits: full 135, no feedback 137, no tool 25,
+  LR control 131; every system has a hit in 6 / 6 cases. Same ordering as the main table.
+* **Root cause and fix (not run).** `src/eval/scoring.key_entities` takes all URLs, domains and file names of the
+  answer-key text. A filter (drop URLs / cloud-storage and public-web domains, names of the evidence archives) would
+  also change the planner labels. Any re-labelled planner or agent run would be a NEW, separately labelled
+  analysis; it was not run in this project (future work).
