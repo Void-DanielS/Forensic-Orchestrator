@@ -32,6 +32,38 @@ Read §0 first, then §1c / §1d. README.md is the full, peer-facing project rep
   mode only, improved Jev-MM: `data/outputs/ml/orchestrate/final_system_k100/` (log `data/outputs/final_system.log`).
   Both recorded in `docs/PREREGISTRATION.md` before running. If not finished: run the two commands of the script.
 
+### RESULTS (2026-11-18, final)
+**Jev-MM improved** (`data/outputs/ml/multimodal/improve_*/REPORT.md`; recipe chosen on validation = the original
+recipe; 3-seed ensemble deployed to `data/models/multimodal/jev_mm.pt`):
+| model (test cases) | accuracy | macro-F1 | user-gen. AUROC |
+|---|---|---|---|
+| **Jev-MM 3-seed ensemble** | **0.759** | **0.553** | 0.911 |
+| Jev-MM single seed (mean of 3) | 0.744 | 0.533 | 0.899 |
+| LR metadata | 0.655 | 0.488 | **0.915** |
+| LR metadata + text | 0.692 | 0.489 | 0.893 |
+| majority class | 0.450 | | 0.5 |
+Per-class F1: camera 0.872, app_asset 0.875, thumbnail 0.784, web_cache 0.658, screenshot 0.340, user_file 0.192,
+messaging 0.154 (small classes are the weakness).
+
+**Pre-registered orchestration evaluation (section 3) DONE** (`data/outputs/ml/orchestrate/eval_k100_final/
+REPORT.md`; 56 runs, one OOM resume). 869 answer-key identifiers in 14 cases:
+| system | LLM quotes | tool | image | union | cases with a hit | LLM quotes rejected / total |
+|---|---|---|---|---|---|---|
+| full | 21 | 132 | 0 | **136 (15.7 %)** | 7/14 | 545 / 1707 |
+| no feedback | 24 | 132 | 0 | **138 (15.9 %)** | 7/14 | 799 / 2572 |
+| no tool | 25 | 0 | 0 | **25 (2.9 %)** | 6/14 | 689 / 2262 |
+| LR ranking | 19 | 127 | 0 | **132 (15.2 %)** | 7/14 | 680 / 2404 |
+Reading: (1) the deterministic extraction tool is what finds identifiers (136 -> 25 without it); (2) planner vs LR
+ranking end to end: 136 vs 132, no real difference (consistent with the planner verdict); (3) feedback rounds add
+nothing (138 without); (4) the verifier rejects about a third of LLM quotes (hallucinations never become evidence);
+(5) the image agent finds 0 identifiers (identifiers are text; its role is triage). 7 of the 14 cases have junk or no
+identifiers (dfrws2005/09/16/17/18, dstl, vto_qysea partly): all hits come from lone_wolf, m57, nist_data_leakage,
+nist_hacking, nist_rhino, owl, vto_parrot. Post-hoc table on the informative cases: TO DO (benchmark section).
+
+**Final-system run** (`full`, improved Jev-MM, `data/outputs/ml/orchestrate/final_system_k100/`): 11/14 cases done
+before a second OOM (owl); resumed for owl + 2 VTO cases. First 11 cases identical to the pre-registered `full` row
+on those cases (lone_wolf 63, m57 4, nist_data_leakage 64, nist_hacking 2, nist_rhino 1).
+
 ### Jev-MM (image model): DL clearly beats LR
 Test (case-level split): Jev-MM 0.744 acc / 0.533 macro-F1 / 0.899 user-gen. AUROC (mean of 3 seeds) vs logistic
 regression (L2 chosen on val) metadata 0.655 / 0.488 / 0.915, metadata+text 0.692 / 0.489 / 0.893; majority 0.450.
